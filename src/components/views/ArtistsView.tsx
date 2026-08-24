@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Track } from "../../App";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { parseArtists } from "../../utils/artists";
@@ -21,6 +21,7 @@ function pickRandomCover(tracks: Track[]): string | undefined {
 }
 
 export function ArtistsView({ tracks, onArtistClick }: ArtistsViewProps) {
+	const [query, setQuery] = useState("");
 	const list = useMemo(() => {
 		if (tracks.length) {
 			const set = new Set<string>();
@@ -31,6 +32,12 @@ export function ArtistsView({ tracks, onArtistClick }: ArtistsViewProps) {
 		}
 		return MOCK;
 	}, [tracks]);
+
+	const filtered = useMemo(() => {
+		if (!query.trim()) return list;
+		const q = query.toLowerCase();
+		return list.filter((a) => a.toLowerCase().includes(q));
+	}, [list, query]);
 
   const artistTracksMap = useMemo(() => {
     const map = new Map<string, Track[]>();
@@ -46,41 +53,59 @@ export function ArtistsView({ tracks, onArtistClick }: ArtistsViewProps) {
 
   const artistCovers = useMemo(() => {
     const covers: Record<string, string | undefined> = {};
-    list.forEach((artist) => {
+    filtered.forEach((artist) => {
       const artistTracks = artistTracksMap.get(artist);
       if (artistTracks) {
         covers[artist] = pickRandomCover(artistTracks);
       }
     });
     return covers;
-  }, [list, artistTracksMap]);
+  }, [filtered, artistTracksMap]);
 
 	return (
 		<div>
 			<div className="view-header">
 				<div className="view-title">Artists</div>
-				<div className="view-subtitle">{list.length} artists</div>
+				<div className="view-subtitle">{filtered.length} artists</div>
 			</div>
-			<div className="artists-grid">
-				{list.map((a, i) => {
-          const coverSrc = artistCovers[a];
-          return (
-            <div key={i} className="artist-card" onClick={() => onArtistClick?.(a)}>
-              {coverSrc ? (
-                <img
-                  className="album-art-img"
-                  src={coverSrc}
-                  alt={a}
-                  style={{ width: "100%", aspectRatio: "1", borderRadius: "var(--radius-md)", objectFit: "cover" }}
-                />
-              ) : (
-                <div className="artist-art-placeholder">{a.charAt(0).toUpperCase()}</div>
-              )}
-              <div className="artist-name">{a}</div>
-            </div>
-          );
-        })}
+
+			<div className="search-bar">
+				<input
+					className="search-input"
+					placeholder="Search artists…"
+					value={query}
+					onChange={(e) => setQuery(e.target.value)}
+				/>
 			</div>
+
+			{filtered.length === 0 ? (
+				<div className="empty-state">
+					<div className="empty-state-icon">♪</div>
+					<div className="empty-state-title">No artists found</div>
+					<div className="empty-state-desc">Try a different search term</div>
+				</div>
+			) : (
+				<div className="artists-grid">
+				{filtered.map((a) => {
+					const coverSrc = artistCovers[a];
+					return (
+						<div key={a} className="artist-card" onClick={() => onArtistClick?.(a)}>
+								{coverSrc ? (
+									<img
+										className="album-art-img"
+										src={coverSrc}
+										alt={a}
+										style={{ width: "100%", aspectRatio: "1", borderRadius: "var(--radius-md)", objectFit: "cover" }}
+									/>
+								) : (
+									<div className="artist-art-placeholder">{a.charAt(0).toUpperCase()}</div>
+								)}
+								<div className="artist-name">{a}</div>
+							</div>
+						);
+					})}
+				</div>
+			)}
 		</div>
 	);
 }
