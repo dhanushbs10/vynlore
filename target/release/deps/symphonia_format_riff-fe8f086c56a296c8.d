@@ -1,0 +1,10 @@
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\symphonia_format_riff-fe8f086c56a296c8.d: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\common.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\wave\mod.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\wave\chunks.rs
+
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\libsymphonia_format_riff-fe8f086c56a296c8.rlib: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\common.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\wave\mod.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\wave\chunks.rs
+
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\libsymphonia_format_riff-fe8f086c56a296c8.rmeta: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\common.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\wave\mod.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\wave\chunks.rs
+
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\lib.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\common.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\wave\mod.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-format-riff-0.5.5\src\wave\chunks.rs:

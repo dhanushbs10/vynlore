@@ -1,0 +1,10 @@
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\audioadapter_sample-3f689553d0e4e23e.d: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\sample.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\readwrite.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\../README.md
+
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\libaudioadapter_sample-3f689553d0e4e23e.rlib: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\sample.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\readwrite.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\../README.md
+
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\libaudioadapter_sample-3f689553d0e4e23e.rmeta: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\sample.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\readwrite.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\../README.md
+
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\lib.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\sample.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\readwrite.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\audioadapter-sample-4.0.0\src\../README.md:

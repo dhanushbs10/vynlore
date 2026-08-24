@@ -1,0 +1,10 @@
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\notify_types-e2f14cb62add7b05.d: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\debouncer_full.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\debouncer_mini.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\event.rs
+
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\libnotify_types-e2f14cb62add7b05.rlib: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\debouncer_full.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\debouncer_mini.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\event.rs
+
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\libnotify_types-e2f14cb62add7b05.rmeta: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\debouncer_full.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\debouncer_mini.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\event.rs
+
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\lib.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\debouncer_full.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\debouncer_mini.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-types-2.1.0\src\event.rs:

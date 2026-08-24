@@ -1,0 +1,10 @@
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\symphonia_codec_adpcm-e9c8c5e10272333c.d: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\codec_ima.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\codec_ms.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\common.rs
+
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\libsymphonia_codec_adpcm-e9c8c5e10272333c.rlib: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\codec_ima.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\codec_ms.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\common.rs
+
+C:\Users\Dhanush\Desktop\Music player\vynlore-audio\target\release\deps\libsymphonia_codec_adpcm-e9c8c5e10272333c.rmeta: C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\lib.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\codec_ima.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\codec_ms.rs C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\common.rs
+
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\lib.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\codec_ima.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\codec_ms.rs:
+C:\Users\Dhanush\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\symphonia-codec-adpcm-0.5.5\src\common.rs:

@@ -1,0 +1,183 @@
+use tauri::State;
+use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use cpal::traits::{HostTrait, DeviceTrait};
+use crate::state::AppState;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct UiTrack {
+  pub id: i64,
+  pub file_path: String,
+  pub title: String,
+  pub artist: String,
+  pub album: String,
+  pub sample_rate: u32,
+  pub bit_depth: u32,
+  pub channels: u8,
+  pub duration_secs: f64,
+  pub cover_path: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct UiDevice {
+  pub index: usize,
+  pub name: String,
+}
+
+#[tauri::command]
+pub fn get_tracks(state: State<AppState>) -> Result<Vec<UiTrack>, String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  let mut stmt = db.conn.prepare("SELECT id, file_path, title, artist, album, sample_rate, bit_depth, channels, duration_secs, cover_path FROM tracks ORDER BY album, track_number").map_err(|e| e.to_string())?;
+  let track_iter = stmt.query_map([], |row| {
+    Ok(UiTrack {
+      id: row.get(0)?,
+      file_path: row.get(1)?,
+      title: row.get(2)?,
+      artist: row.get(3)?,
+      album: row.get(4)?,
+      sample_rate: row.get(5)?,
+      bit_depth: row.get(6)?,
+      channels: row.get(7)?,
+      duration_secs: row.get(8)?,
+      cover_path: row.get(9)?,
+    })
+  }).map_err(|e| e.to_string())?;
+
+  let mut tracks = Vec::new();
+  for track in track_iter {
+    tracks.push(track.map_err(|e| e.to_string())?);
+  }
+  Ok(tracks)
+}
+
+#[tauri::command]
+pub fn list_devices() -> Result<Vec<UiDevice>, String> {
+  let host = cpal::default_host();
+  let devices: Vec<_> = host.output_devices().map_err(|e| e.to_string())?.collect();
+  let mut ui_devices = Vec::new();
+  for (idx, device) in devices.iter().enumerate() {
+    let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+    ui_devices.push(UiDevice { index: idx + 1, name });
+  }
+  Ok(ui_devices)
+}
+
+#[tauri::command]
+pub fn scan_folder(path: String, state: State<AppState>) -> Result<usize, String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  let count = crate::library::scanner::scan_folder(&db, std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+  Ok(count)
+}
+
+#[tauri::command]
+pub fn set_volume(volume: f64, state: State<AppState>) -> Result<(), String> {
+  let mut vol = state.volume.lock().map_err(|e| e.to_string())?;
+  *vol = volume as f32;
+  Ok(())
+}
+
+#[tauri::command]
+pub fn pause_playback(state: State<AppState>) -> Result<(), String> {
+  let output = state.output.lock().map_err(|e| e.to_string())?;
+  if let Some(out) = output.as_ref() {
+    out.pause();
+  }
+  Ok(())
+}
+
+#[tauri::command]
+pub fn resume_playback(state: State<AppState>) -> Result<(), String> {
+  let output = state.output.lock().map_err(|e| e.to_string())?;
+  if let Some(out) = output.as_ref() {
+    out.resume();
+  }
+  Ok(())
+}
+
+#[tauri::command]
+pub fn play_track(file_path: String, device_index: Option<usize>, state: State<AppState>) -> Result<(), String> {
+  let path = PathBuf::from(&file_path);
+  if !path.exists() { return Err("File not found".to_string()); }
+
+  let (decoder, format) = crate::decoder::flac::open_flac(&path).map_err(|e| e.to_string())?;
+
+  let device = match device_index {
+    Some(num) => crate::audio::output::select_device_by_number(num).map_err(|e| e.to_string())?,
+    None => cpal::default_host().default_output_device().ok_or("No default output device found".to_string())?,
+  };
+
+  let device_config = crate::audio::output::find_best_config(&device, format.channels).map_err(|e| e.to_string())?;
+  let device_sample_rate = device_config.sample_rate().0;
+  let device_channels = device_config.channels();
+
+  let output_config = crate::audio::config::AudioConfig {
+    sample_rate: device_sample_rate,
+    channels: device_channels,
+    bits_per_sample: match device_config.sample_format() {
+      cpal::SampleFormat::F32 => 32,
+      cpal::SampleFormat::I16 => 16,
+      cpal::SampleFormat::I32 => 32,
+      _ => 32,
+    },
+    exclusive_mode: true,
+  };
+
+  let needs_resample = device_sample_rate != format.sample_rate;
+  let decoder_arc = Arc::new(Mutex::new(decoder));
+  let decoder_clone = decoder_arc.clone();
+
+  let resampler = if needs_resample {
+    Some(Arc::new(Mutex::new(crate::audio::resampler::AudioResampler::new(format.sample_rate, device_sample_rate, format.channels as usize).map_err(|e| e.to_string())?)))
+  } else {
+    None
+  };
+  let resampler_clone = resampler.clone();
+  let volume_clone = state.volume.clone();
+
+  let audio_output = crate::audio::output::AudioOutput::start(&output_config, Some(&device), move |output_buffer| {
+    if let Some(ref resampler_arc) = resampler_clone {
+      let mut dec = decoder_clone.lock().unwrap();
+      let mut resampler = resampler_arc.lock().unwrap();
+      while !resampler.has_enough_for_samples(output_buffer.len()) {
+        match crate::decoder::flac::decode_packet(&mut *dec) {
+          Some(samples) => resampler.add_input(&samples),
+          None => { resampler.flush(); break; }
+        }
+      }
+      let written = resampler.get_output(output_buffer);
+      if written < output_buffer.len() { output_buffer[written..].fill(0.0); }
+    } else {
+      let mut dec = decoder_clone.lock().unwrap();
+      crate::decoder::flac::fill_buffer(&mut *dec, output_buffer);
+    }
+
+    let vol = *volume_clone.lock().unwrap();
+    for sample in output_buffer.iter_mut() {
+      *sample *= vol;
+    }
+  }).map_err(|e| e.to_string())?;
+
+  *state.output.lock().map_err(|e| e.to_string())? = Some(audio_output);
+  *state.decoder.lock().map_err(|e| e.to_string())? = Some(decoder_arc);
+  *state.resampler.lock().map_err(|e| e.to_string())? = resampler;
+  Ok(())
+}
+
+#[tauri::command]
+pub fn stop_playback(state: State<AppState>) -> Result<(), String> {
+  *state.output.lock().map_err(|e| e.to_string())? = None;
+  *state.decoder.lock().map_err(|e| e.to_string())? = None;
+  *state.resampler.lock().map_err(|e| e.to_string())? = None;
+  Ok(())
+}
+
+#[tauri::command]
+pub fn seek_playback(seek_secs: f64, state: State<AppState>) -> Result<(), String> {
+  let decoder_arc = state.decoder.lock().map_err(|e| e.to_string())?;
+  if let Some(decoder_arc) = decoder_arc.as_ref() {
+    let mut dec = decoder_arc.lock().map_err(|e| e.to_string())?;
+    crate::decoder::flac::seek(&mut *dec, seek_secs).map_err(|e| e.to_string())?;
+  }
+  Ok(())
+}
