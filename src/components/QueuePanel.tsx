@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { motion } from "framer-motion";
 import { Track } from "../types";
 import { usePlayer } from "../context/PlayerContext";
 
@@ -15,10 +16,10 @@ export function QueuePanel({ displayedTracks, currentTrackIndex, playTrack }: Qu
 
     if (!displayedTracks || displayedTracks.length === 0) {
         return (
-            <div className="queue-panel">
-                <div className="queue-header">Up Next</div>
-                <div className="queue-list">
-                    <div className="queue-empty">Queue is empty</div>
+            <div className="w-[264px] h-screen bg-bg border-l border-border flex flex-col shrink-0">
+                <div className="px-5 pt-6 pb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-text-muted">Up Next</div>
+                <div className="flex-1 overflow-y-auto px-3 pb-3">
+                    <div className="px-2 py-6 text-center text-text-muted text-sm">Queue is empty</div>
                 </div>
             </div>
         );
@@ -64,32 +65,45 @@ export function QueuePanel({ displayedTracks, currentTrackIndex, playTrack }: Qu
     };
 
     return (
-        <div className="queue-panel">
-            <div className="queue-header">Up Next</div>
-            <div className="queue-list">
+        <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            className="w-[264px] h-screen bg-bg border-l border-border flex flex-col shrink-0"
+        >
+            <div className="px-5 pt-6 pb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-text-muted">Up Next</div>
+            <div className="flex-1 overflow-y-auto px-3 pb-3">
                 {upcoming.length === 0 ? (
-                    <div className="queue-empty">No upcoming tracks</div>
+                    <div className="px-2 py-6 text-center text-text-muted text-sm">No upcoming tracks</div>
                 ) : (
                     upcoming.map((track, i) => {
                         const realIdx = start + i;
                         return (
-                            <div
+                            <motion.div
                                 key={`${track.id}-${realIdx}`}
-                                className="queue-item"
-                                onClick={() => playTrack(track, displayedTracks)}
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, realIdx)}
-                                onDragEnd={handleDragEnd}
-                                onDragOver={(e) => handleDragOver(e, e.currentTarget)}
-                                onDrop={(e) => handleDrop(e, realIdx)}
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, x: 20 }}
+                                transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                                className="px-3 py-2.5 rounded-lg cursor-pointer hover:bg-bg-hover transition-colors"
                             >
-                                <div className="queue-title">{track.title}</div>
-                                <div className="queue-artist">{track.artist}</div>
-                            </div>
+                                <div
+                                    draggable
+                                    onDragStart={(e) => handleDragStart(e, realIdx)}
+                                    onDragEnd={handleDragEnd}
+                                    onDragOver={(e) => handleDragOver(e, e.currentTarget as HTMLDivElement)}
+                                    onDrop={(e) => handleDrop(e as unknown as React.DragEvent, realIdx)}
+                                    onClick={() => playTrack(track, displayedTracks)}
+                                >
+                                    <div className="text-sm font-medium text-text truncate">{track.title}</div>
+                                    <div className="text-xs text-text-muted truncate mt-0.5">{track.artist}</div>
+                                </div>
+                            </motion.div>
                         );
                     })
                 )}
             </div>
-        </div>
+        </motion.div>
     );
 }

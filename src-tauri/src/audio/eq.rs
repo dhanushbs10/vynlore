@@ -72,7 +72,7 @@ impl Biquad {
 
 	#[inline]
 	fn process(&mut self, x: f64) -> f64 {
-		let y = self.c.b0 * x as f64
+		let y = self.c.b0 * x
 			+ self.c.b1 * self.x1
 			+ self.c.b2 * self.x2
 			- self.c.a1 * self.y1
@@ -105,7 +105,7 @@ fn design_band(band: usize, gain_db: f32, sample_rate: u32) -> Coeffs {
 	let (b0, b1, b2, a0, a1, a2);
 	if band == 0 {
 		// Low shelf (S = 1)
-		let alpha = sin_w0 / 2.0 * std::f64::consts::SQRT_2;
+		let alpha = sin_w0 / 2.0 * a.sqrt();
 		let sq = 2.0 * a.sqrt() * alpha;
 		b0 = a * ((a + 1.0) - (a - 1.0) * cos_w0 + sq);
 		b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
@@ -115,7 +115,7 @@ fn design_band(band: usize, gain_db: f32, sample_rate: u32) -> Coeffs {
 		a2 = (a + 1.0) + (a - 1.0) * cos_w0 - sq;
 	} else if band == EQ_BAND_COUNT - 1 {
 		// High shelf (S = 1)
-		let alpha = sin_w0 / 2.0 * std::f64::consts::SQRT_2;
+		let alpha = sin_w0 / 2.0 * a.sqrt();
 		let sq = 2.0 * a.sqrt() * alpha;
 		b0 = a * ((a + 1.0) + (a - 1.0) * cos_w0 + sq);
 		b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0);

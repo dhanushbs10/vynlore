@@ -2,6 +2,7 @@ import { useMemo, useCallback } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePlayer } from "../../context/PlayerContext";
 import { ArrowLeft, Play, Shuffle } from "lucide-react";
+import { motion } from "framer-motion";
 import { formatDuration, hasCover } from "../../utils/format";
 import { fisherYates } from "../../utils/shuffle";
 import type { Track } from "../../types";
@@ -47,77 +48,76 @@ export function GenreDetailView({
   }, [filtered, isShuffle, toggleShuffle, playTrack]);
 
   return (
-    <div>
-      <div
-        className="view-header"
-        style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 28 }}
-      >
-        <button className="ctrl-btn" onClick={onBack} aria-label="Back to genres">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+      <div className="flex items-center gap-4 mb-7">
+        <button onClick={onBack} className="p-2 rounded-lg hover:bg-bg-hover text-text-secondary hover:text-text transition-colors" aria-label="Back to genres">
           <ArrowLeft size={18} />
         </button>
-        <div className="view-title">{genre}</div>
-        <div className="view-subtitle">{filtered.length} tracks</div>
-        <div style={{ display: "flex", gap: 10, marginLeft: "auto" }}>
-          <button
-            className="ctrl-btn"
+        <div>
+          <h1 className="font-display text-2xl font-bold text-text tracking-tight">{genre}</h1>
+          <p className="text-sm text-text-secondary mt-1">{filtered.length} tracks</p>
+        </div>
+        <div className="flex gap-2.5 ml-auto">
+          <motion.button
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-bg-raised text-text-secondary text-xs font-semibold hover:bg-bg-hover hover:text-text transition-colors w-auto"
             onClick={handleShuffle}
+            whileTap={{ scale: 0.95 }}
             aria-label="Shuffle genre"
-            style={{ padding: "0 12px", gap: 8, width: "auto" }}
           >
             <Shuffle size={15} />
-            <span style={{ fontSize: 12, fontWeight: 600 }}>Shuffle</span>
-          </button>
-          <button
-            className="play-btn"
+            <span>Shuffle</span>
+          </motion.button>
+          <motion.button
+            className="w-11 h-11 rounded-full bg-accent text-bg flex items-center justify-center shadow-[0_0_20px_var(--color-accent-glow)] hover:scale-105 active:scale-95 transition-transform"
             onClick={handlePlayGenre}
-            style={{ width: 44, height: 44, background: "#d4a373", color: "#0c0d12" }}
+            whileTap={{ scale: 0.95 }}
             aria-label="Play genre"
           >
-            <Play size={18} fill="#0c0d12" />
-          </button>
+            <Play size={18} fill="currentColor" />
+          </motion.button>
         </div>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-text">No tracks found for this genre.</div>
+        <div className="text-center py-16 text-text-muted">
+          <div className="text-sm text-text-secondary">No tracks found for this genre.</div>
         </div>
       ) : (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 22,
-          }}
+        <motion.div
+          className="flex flex-wrap gap-[22px]"
+          variants={{ show: { transition: { staggerChildren: 0.03 } } }}
+          initial="hidden"
+          animate="show"
         >
           {filtered.map((track) => {
             const coverSrc = hasCover(track)
               ? convertFileSrc(track.cover_path!)
               : undefined;
             return (
-              <div
+              <motion.div
                 key={track.id}
-                className="album-card"
+                variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+                whileHover={{ y: -3, transition: { type: "spring", stiffness: 400, damping: 25 } }}
+                className="w-[170px] cursor-pointer group"
                 onClick={() => playTrack(track, filtered)}
-                style={{ width: 170 }}
               >
                 {coverSrc ? (
-                  <img className="album-art-img" src={coverSrc} alt={track.title} />
+                  <img className="w-full aspect-square object-cover rounded-xl shadow-lg group-hover:shadow-xl transition-shadow" src={coverSrc} alt={track.title} />
                 ) : (
-                  <div className="album-art" />
+                  <div className="w-full aspect-square bg-bg-surface rounded-xl" />
                 )}
-                <div className="album-title" title={track.title}>
+                <div className="mt-2 text-sm font-medium text-text truncate" title={track.title}>
                   {track.title}
                 </div>
-                <div className="album-artist" title={track.artist}>
+                <div className="text-xs text-text-secondary truncate mt-0.5" title={track.artist}>
                   {track.artist}
                 </div>
-                <div className="time-cell">{formatDuration(track.duration_secs)}</div>
-              </div>
+                <div className="text-sm text-text-muted tabular-nums text-right mt-0.5">{formatDuration(track.duration_secs)}</div>
+              </motion.div>
             );
           })}
-        </div>
+        </motion.div>
       )}
-    </div>
+    </motion.div>
   );
 }

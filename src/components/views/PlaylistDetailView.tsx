@@ -1,24 +1,17 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, Play, Shuffle, X } from "lucide-react";
+import { motion } from "framer-motion";
 import { usePlayer } from "../../context/PlayerContext";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { formatDuration, hasCover } from "../../utils/format";
+import { fisherYates } from "../../utils/shuffle";
 import type { Track } from "../../types";
 
 interface PlaylistDetailViewProps {
   playlistId: number;
   playTrack: (track: Track, queue?: Track[]) => void;
   onBack: () => void;
-}
-
-function fisherYates<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
 }
 
 export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDetailViewProps) {
@@ -73,41 +66,51 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
   const totalDuration = tracks.reduce((acc, t) => acc + t.duration_secs, 0);
 
   return (
-    <div>
-      <div className="view-header" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 28 }}>
-        <button className="ctrl-btn" onClick={onBack} aria-label="Back">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+      <div className="flex items-center gap-4 mb-7">
+        <button onClick={onBack} className="p-2 rounded-lg hover:bg-bg-hover text-text-secondary hover:text-text transition-colors" aria-label="Back">
           <ArrowLeft size={18} />
         </button>
         <div>
-          <div className="view-title">{name}</div>
-          <div className="view-subtitle">
+          <h1 className="font-display text-2xl font-bold text-text tracking-tight">{name}</h1>
+          <p className="text-sm text-text-secondary mt-1">
             {tracks.length} track{tracks.length === 1 ? "" : "s"} · {formatDuration(totalDuration)}
-          </div>
+          </p>
         </div>
-        <div style={{ display: "flex", gap: 10, marginLeft: "auto" }}>
-          <button className="ctrl-btn" onClick={handleShuffle} aria-label="Shuffle" style={{ padding: "0 12px", gap: 8, width: "auto" }}>
+        <div className="flex gap-2.5 ml-auto">
+          <motion.button
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-bg-raised text-text-secondary text-xs font-semibold hover:bg-bg-hover hover:text-text transition-colors w-auto"
+            onClick={handleShuffle}
+            whileTap={{ scale: 0.95 }}
+            aria-label="Shuffle"
+          >
             <Shuffle size={15} />
-            <span style={{ fontSize: 12, fontWeight: 600 }}>Shuffle</span>
-          </button>
-          <button className="play-btn" onClick={handlePlay} style={{ width: 44, height: 44, background: "var(--accent-warm)", color: "var(--bg-deep)" }} aria-label="Play playlist">
-            <Play size={18} fill="var(--bg-deep)" />
-          </button>
+            <span>Shuffle</span>
+          </motion.button>
+          <motion.button
+            className="w-11 h-11 rounded-full bg-accent text-bg flex items-center justify-center shadow-[0_0_20px_var(--color-accent-glow)] hover:scale-105 active:scale-95 transition-transform"
+            onClick={handlePlay}
+            whileTap={{ scale: 0.95 }}
+            aria-label="Play playlist"
+          >
+            <Play size={18} fill="currentColor" />
+          </motion.button>
         </div>
       </div>
 
       {tracks.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-text">No tracks in this playlist.</div>
+        <div className="text-center py-16 text-text-muted">
+          <div className="text-sm text-text-secondary">No tracks in this playlist.</div>
         </div>
       ) : (
-        <div className="tracks-table">
-          <div className="tracks-row track-header">
-            <div className="track-cell" style={{ width: 48 }} />
-            <div className="track-cell">#</div>
-            <div className="track-cell">Title</div>
-            <div className="track-cell">Artist</div>
-            <div className="track-cell time-cell">TIME</div>
-            <div className="track-cell" style={{ width: 40 }} />
+        <div>
+          <div className="grid grid-cols-[48px_40px_1fr_1fr_70px_40px] items-center gap-2.5 px-3 py-2 text-xs font-medium text-text-muted uppercase tracking-wider">
+            <div />
+            <div>#</div>
+            <div>Title</div>
+            <div>Artist</div>
+            <div className="text-right">Time</div>
+            <div />
           </div>
           {tracks.map((track, idx) => {
             const active = currentTrack && track.id === currentTrack.id;
@@ -115,32 +118,25 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
             return (
               <div
                 key={track.id}
-                className={`tracks-row ${active ? "track-active" : ""}`}
+                className={`grid grid-cols-[48px_40px_1fr_1fr_70px_40px] items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer hover:bg-bg-hover transition-colors ${active ? "bg-accent-soft" : ""}`}
                 onClick={() => playTrack(track, tracks)}
               >
-                <div className="track-cell" style={{ width: 48 }}>
+                <div className="w-12">
                   {coverPath ? (
-                    <img className="track-thumb" src={coverPath} alt="" />
+                    <img className="w-10 h-10 rounded-md object-cover" src={coverPath} alt="" />
                   ) : (
-                    <div className="track-thumb-empty" />
+                    <div className="w-10 h-10 rounded-md bg-bg-surface" />
                   )}
                 </div>
-                <div className="track-cell track-num">{active ? <span className="equalizer" /> : idx + 1}</div>
-                <div className="track-cell track-title">{track.title}</div>
-                <div className="track-cell track-meta">{track.artist}</div>
-                <div className="track-cell time-cell">{formatDuration(track.duration_secs)}</div>
-                <div className="track-cell" style={{ width: 40, textAlign: "center" }}>
+                <div className="text-sm text-text-secondary text-center">{active ? <span className="eq-bars" /> : idx + 1}</div>
+                <div className="text-sm font-medium text-text truncate">{track.title}</div>
+                <div className="text-sm text-text-secondary truncate">{track.artist}</div>
+                <div className="text-sm text-text-muted tabular-nums text-right">{formatDuration(track.duration_secs)}</div>
+                <div className="text-center">
                   <button
                     onClick={(e) => handleRemoveTrack(e, track.id)}
                     aria-label="Remove from playlist"
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "var(--text-tertiary)",
-                      padding: 4,
-                      display: "inline-flex",
-                    }}
+                    className="text-text-muted hover:text-text p-1 inline-flex transition-colors"
                   >
                     <X size={14} />
                   </button>
@@ -150,6 +146,6 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
           })}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

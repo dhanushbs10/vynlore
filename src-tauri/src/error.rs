@@ -23,6 +23,10 @@ impl std::error::Error for AudioError {}
 
 impl From<std::io::Error> for AudioError {
     fn from(e: std::io::Error) -> Self {
-        AudioError::ConfigError(e.to_string())
+        match e.kind() {
+            std::io::ErrorKind::NotFound => AudioError::FileError(e.to_string()),
+            std::io::ErrorKind::PermissionDenied => AudioError::FileError(e.to_string()),
+            _ => AudioError::OutputError(e.to_string()),
+        }
     }
 }

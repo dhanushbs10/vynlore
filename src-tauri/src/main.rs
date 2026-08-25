@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 use tauri::Emitter;
 mod commands;
@@ -13,6 +14,13 @@ use library::scanner::scan_folder_with_progress as scan_folder_internal;
 use library::watcher::WatcherEvent;
 
 fn main() {
+  // Headless exclusive-mode self test: `vynlore-audio --excl-test`
+  if std::env::args().any(|a| a == "--excl-test") {
+    #[cfg(windows)]
+    crate::audio::wasapi::run_diagnostic_sine();
+    return;
+  }
+
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin({
@@ -21,26 +29,33 @@ fn main() {
       let play_pause = Shortcut::from_str("MediaPlayPause").unwrap();
       let next = Shortcut::from_str("MediaTrackNext").unwrap();
       let prev = Shortcut::from_str("MediaTrackPrevious").unwrap();
-      tauri_plugin_global_shortcut::Builder::new()
+      match tauri_plugin_global_shortcut::Builder::new()
         .with_shortcuts(["MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious"])
-        .expect("failed to register media keys")
-        .with_handler(move |app, shortcut, event| {
-          if event.state() != ShortcutState::Pressed {
-            return;
-          }
-          let key = if shortcut == &play_pause {
-            "play-pause"
-          } else if shortcut == &next {
-            "next"
-          } else if shortcut == &prev {
-            "prev"
-          } else {
-            return;
-          };
-          use tauri::Emitter;
-          let _ = app.emit("media-key", key);
-        })
-        .build()
+        .and_then(|b| Ok(b))
+      {
+        Ok(b) => b
+          .with_handler(move |app, shortcut, event| {
+            if event.state() != ShortcutState::Pressed {
+              return;
+            }
+            let key = if shortcut == &play_pause {
+              "play-pause"
+            } else if shortcut == &next {
+              "next"
+            } else if shortcut == &prev {
+              "prev"
+            } else {
+              return;
+            };
+            use tauri::Emitter;
+            let _ = app.emit("media-key", key);
+          })
+          .build(),
+        Err(e) => {
+          eprintln!("Media key registration unavailable: {}", e);
+          tauri_plugin_global_shortcut::Builder::new().build()
+        }
+      }
     })
     .setup(|app| {
       let db_path = app.path().app_data_dir().expect("Failed to get app data dir").join("library.db");
@@ -60,14 +75,38 @@ fn main() {
         volume: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
         eq: crate::audio::eq::shared_eq(),
         current_path: std::sync::Mutex::new(None),
+        spectrum: std::sync::Arc::new(crate::audio::spectrum::SpectrumAnalyzer::new()),
+        balance: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
+        preamp: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
       };
       app.manage(state);
+
+      let spectrum = app.state::<AppState>().spectrum.clone();
+      let app_handle_clone = app.handle().clone();
+      let spectrum_running = std::sync::Arc::new(AtomicBool::new(true));
+      let spectrum_running_clone = spectrum_running.clone();
+      std::thread::Builder::new()
+        .name("vynlore-spectrum".into())
+        .spawn(move || {
+          while spectrum_running_clone.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(33));
+            spectrum.compute();
+            let bins = spectrum.snapshot();
+            let _ = app_handle_clone.emit(
+              "spectrum-data",
+              crate::audio::spectrum::SpectrumPayload { bins },
+            );
+          }
+        })
+        .expect("failed to spawn spectrum thread");
 
       if let Ok(Some(folder)) = commands::get_watched_folder(app.handle().clone()) {
         let db = app.state::<AppState>().db.clone();
         let folder_path = folder.clone();
         let app_handle = app.handle().clone();
-        std::thread::spawn(move || {
+        let _ = std::thread::Builder::new()
+          .name("vynlore-startup-scan".into())
+          .spawn(move || {
           let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if let Ok(db) = db.lock() {
               scan_folder_internal(&db, std::path::Path::new(&folder_path), |count| {
@@ -114,6 +153,8 @@ fn main() {
       commands::scan_folder,
       commands::start_watcher,
       commands::set_volume,
+      commands::set_balance,
+      commands::set_preamp,
       commands::pause_playback,
       commands::resume_playback,
       commands::play_track,

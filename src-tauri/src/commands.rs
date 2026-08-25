@@ -221,6 +221,20 @@ pub fn set_volume(volume: f64, state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn set_balance(balance: f64, state: State<AppState>) -> Result<(), String> {
+  let clamped = balance.clamp(-1.0, 1.0) as f32;
+  state.balance.store(clamped.to_bits(), Ordering::Relaxed);
+  Ok(())
+}
+
+#[tauri::command]
+pub fn set_preamp(preamp: f64, state: State<AppState>) -> Result<(), String> {
+  let clamped = preamp.clamp(0.0, 2.0) as f32;
+  state.preamp.store(clamped.max(0.001).to_bits(), Ordering::Relaxed);
+  Ok(())
+}
+
+#[tauri::command]
 pub fn pause_playback(state: State<AppState>) -> Result<(), String> {
   if let Some(control) = state.active_control() {
     control.paused.store(true, Ordering::Relaxed);
@@ -249,7 +263,10 @@ pub fn play_track(
     return Err("File not found".to_string());
   }
 
-  let old_handle = state.playback.lock().map_err(|e| e.to_string())?.take();
+  // Hold the lock for the entire take-start-store sequence to prevent
+  // two concurrent play_track calls from interleaving.
+  let mut guard = state.playback.lock().map_err(|e| e.to_string())?;
+  let old_handle = guard.take();
   drop(old_handle);
 
   let (handle, exclusive_active) = player::start(
@@ -258,11 +275,15 @@ pub fn play_track(
     exclusive.unwrap_or(false),
     state.volume.clone(),
     state.eq.clone(),
+    state.spectrum.clone(),
+    state.balance.clone(),
+    state.preamp.clone(),
     app,
     0.0,
   )?;
 
-  *state.playback.lock().map_err(|e| e.to_string())? = Some(handle);
+  *guard = Some(handle);
+  drop(guard);
   *state.current_path.lock().map_err(|e| e.to_string())? = Some(path);
   Ok(exclusive_active)
 }

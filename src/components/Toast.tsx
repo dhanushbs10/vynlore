@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
-import "../styles/toast.css";
+import { useEffect, useRef } from "react";
 import { Music2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export interface ToastMessage {
   id: number;
@@ -14,25 +14,23 @@ interface ToastProps {
 }
 
 export function Toast({ toasts, onDismiss }: ToastProps) {
-  if (toasts.length === 0) return null;
-
   return (
-    <div className="toast-stack">
-      {toasts.map((t) => (
-        <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
-      ))}
+    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
+      <AnimatePresence>
+        {toasts.map((t) => (
+          <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
 
 function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: number) => void }) {
-  const [leaving, setLeaving] = useState(false);
   const timer = useRef<number | null>(null);
 
   useEffect(() => {
     timer.current = window.setTimeout(() => {
-      setLeaving(true);
-      setTimeout(() => onDismiss(toast.id), 200);
+      onDismiss(toast.id);
     }, 4000);
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
@@ -40,12 +38,18 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
   }, [toast.id, onDismiss]);
 
   return (
-    <div className={`toast-item${leaving ? " leaving" : ""}`}>
-      <Music2 className="toast-icon" />
-      <div className="toast-body">
-        <span className="toast-title">{toast.title}</span>
-        {toast.subtitle && <span className="toast-sub">{toast.subtitle}</span>}
+    <motion.div
+      initial={{ opacity: 0, x: 40 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 40 }}
+      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+      className="pointer-events-auto flex items-center gap-2.5 px-4 py-3 min-w-[240px] max-w-[380px] bg-bg-elevated border border-border rounded-xl shadow-lg text-text text-sm font-medium"
+    >
+      <Music2 className="shrink-0 w-[18px] h-[18px] text-accent" />
+      <div className="flex flex-col gap-px min-w-0">
+        <span className="font-semibold truncate">{toast.title}</span>
+        {toast.subtitle && <span className="text-xs text-text-secondary truncate">{toast.subtitle}</span>}
       </div>
-    </div>
+    </motion.div>
   );
 }

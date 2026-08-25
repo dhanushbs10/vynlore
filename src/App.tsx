@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import "./styles/toast.css";
+import { motion, AnimatePresence } from "framer-motion";
 import { PlayerProvider, usePlayer } from "./context/PlayerContext";
 import { Sidebar } from "./components/Sidebar";
 import { QueuePanel } from "./components/QueuePanel";
@@ -147,11 +147,12 @@ function AppInner() {
 
   useEffect(() => {
     if (!isTauri()) return;
+    let disposed = false;
     let unlisten: (() => void) | null = null;
 
     const setup = async () => {
       try {
-        unlisten = await listen<WatcherPayload>("watcher-event", (event) => {
+        const fn = await listen<WatcherPayload>("watcher-event", (event) => {
           const { title, count } = event.payload;
           if (!/^removed$/i.test(title)) {
             const id = Date.now() + Math.random();
@@ -164,6 +165,8 @@ function AppInner() {
             loadTracks();
           }
         });
+        if (disposed) { fn(); return; }
+        unlisten = fn;
       } catch (err) {
         console.error("Failed to listen for watcher events:", err);
       }
@@ -171,7 +174,8 @@ function AppInner() {
 
     setup();
     return () => {
-      if (unlisten) unlisten();
+      disposed = true;
+      unlisten?.();
     };
   }, [loadTracks]);
 
@@ -188,10 +192,11 @@ function AppInner() {
       setWatchedFolder(selected);
     } catch (err) {
       console.error("Scan failed:", err);
-    } finally {
       setScanning(false);
     }
-  }, [loadTracks]);
+  }, []);
+
+  const handleBackToPlaylist = useCallback(() => setSelectedPlaylist(null), []);
 
   const handleNav = useCallback(
     (view: string) => {
@@ -251,7 +256,7 @@ function AppInner() {
   }, [playTrack, libraryTracks]);
 
   return (
-    <div className="app-shell">
+    <div className="flex h-screen w-screen overflow-hidden bg-bg">
       <Sidebar
         onAddFolder={handleAddFolder}
         currentView={currentView}
@@ -261,12 +266,16 @@ function AppInner() {
         onOpenSearch={() => setShowSearch(true)}
         onToggleEq={() => setShowEq((v) => !v)}
       />
-      <main className="app-main">
-        <div className="main-scroll">
-          {showFullNow && currentTrack ? (
-            <FullscreenNowPlaying onClose={() => setShowFullNow(false)} />
-          ) : (
-            <>
+      <main className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 overflow-y-auto p-8 pb-28">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentView}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.25 }}
+            >
               {currentView === "now" && (
                 <HomeView
                   libraryTracks={libraryTracks}
@@ -290,7 +299,6 @@ function AppInner() {
                   tracks={libraryTracks}
                   onBack={handleBackToAlbums}
                   playTrack={playTrack}
-                  displayedTracksSetter={setDisplayedTracks}
                 />
               )}
               {currentView === "artists" && (
@@ -317,8 +325,6 @@ function AppInner() {
               )}
               {currentView === "playlists" && (
                 <PlaylistsView
-                  _libraryTracks={libraryTracks}
-                  _playTrack={playTrack}
                   onPlaylistClick={handlePlaylistClick}
                 />
               )}
@@ -326,11 +332,11 @@ function AppInner() {
                 <PlaylistDetailView
                   playlistId={selectedPlaylist}
                   playTrack={playTrack}
-                  onBack={() => setSelectedPlaylist(null)}
+                  onBack={handleBackToPlaylist}
                 />
               )}
-            </>
-          )}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </main>
       <QueuePanel
@@ -354,6 +360,14 @@ function AppInner() {
           }}
         />
       )}
+      <AnimatePresence>
+        {showFullNow && currentTrack && (
+          <FullscreenNowPlaying
+            onClose={() => setShowFullNow(false)}
+            onOpenEq={() => { setShowFullNow(false); setShowEq(true); }}
+          />
+        )}
+      </AnimatePresence>
       <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

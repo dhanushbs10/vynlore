@@ -2,6 +2,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use crate::audio::player::{ControlBlock, PlaybackHandle};
+use crate::audio::spectrum::SpectrumAnalyzer;
 use crate::library::db::LibraryDb;
 
 pub struct AppState {
@@ -10,6 +11,9 @@ pub struct AppState {
 	pub volume: Arc<AtomicU32>,
 	pub eq: crate::audio::eq::SharedEq,
 	pub current_path: Mutex<Option<std::path::PathBuf>>,
+	pub spectrum: Arc<SpectrumAnalyzer>,
+	pub balance: Arc<AtomicU32>,
+	pub preamp: Arc<AtomicU32>,
 }
 
 // SAFETY: PlaybackHandle contains a cpal::Stream which lacks Send/Sync impls on some

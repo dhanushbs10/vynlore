@@ -51,6 +51,8 @@ const VOLUME_KEY = "vynlore.volume";
 const DEVICE_KEY = "vynlore.device";
 const EXCLUSIVE_KEY = "vynlore.exclusive";
 const EQ_KEY = "vynlore.eq";
+const BALANCE_KEY = "vynlore.balance";
+const PREAMP_KEY = "vynlore.preamp";
 
 interface EqPersisted {
     enabled: boolean;
@@ -95,7 +97,7 @@ function loadStoredVolume(): number {
     } catch {
         // localStorage unavailable
     }
-    return 0.8;
+    return 1.0;
 }
 
 function loadStoredDevice(): number | null {
@@ -300,8 +302,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const setLibraryTracks = useCallback((tracks: Track[]) => {
         _setLibraryTracks(tracks);
-        if (displayedTracks.length === 0) _setDisplayedTracks(tracks);
-    }, [displayedTracks.length]);
+        if (displayedTracksRef.current.length === 0) _setDisplayedTracks(tracks);
+    }, []);
 
     const setDisplayedTracks = useCallback((tracks: Track[]) => {
         _setDisplayedTracks(tracks);
@@ -344,6 +346,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     useEffect(() => {
         if (isTauri()) {
             invoke("set_volume", { volume: volumeRef.current }).catch(() => {});
+            // Restore persisted balance and preamp so the first playback honors them.
+            try {
+                const balRaw = window.localStorage.getItem(BALANCE_KEY);
+                if (balRaw !== null) {
+                    const bal = Number(balRaw);
+                    if (Number.isFinite(bal)) invoke("set_balance", { balance: bal }).catch(() => {});
+                }
+                const preRaw = window.localStorage.getItem(PREAMP_KEY);
+                if (preRaw !== null) {
+                    const pre = Number(preRaw);
+                    if (Number.isFinite(pre)) invoke("set_preamp", { preamp: pre }).catch(() => {});
+                }
+            } catch { /* ignore */ }
         }
     }, []);
 
@@ -450,14 +465,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             : "Vynlore";
     }, [currentTrack]);
 
-    const seekTime = (time: number) => {
+    const seekTime = useCallback((time: number) => {
         setCurrentTime(Math.max(0, time));
         if (isTauri()) {
             invoke("seek_playback", { seekSecs: time }).catch((err) =>
                 console.error("Seek failed:", err)
             );
         }
-    };
+    }, []);
 
     async function playNextInternal(): Promise<void> {
         const queue = displayedTracksRef.current;
@@ -501,7 +516,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // file's native format).
             const active = await invoke<boolean>("play_track", {
                 filePath: track.file_path,
-                deviceIndex: selectedDevice,
+                deviceIndex: selectedDeviceRef.current,
                 exclusive: exclusiveRef.current,
             });
             setExclusiveActive(active);
@@ -572,7 +587,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const restored =
                 preShuffleQueueRef.current.length > 0
                     ? [...preShuffleQueueRef.current]
-                    : [...libraryTracks];
+                    : [...displayedTracksRef.current];
             const idx = currentTrack ? restored.findIndex((t) => t.id === currentTrack.id) : -1;
             _setDisplayedTracks(restored);
             setCurrentTrackIndex(idx >= 0 ? idx : 0);
@@ -601,9 +616,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     const playPrev = async () => {
-        const queue = displayedTracks;
+        const queue = displayedTracksRef.current;
         if (queue.length === 0) return;
-        let idx = queue.findIndex((t) => t.id === currentTrack?.id);
+        let idx = queue.findIndex((t) => t.id === currentTrackRef.current?.id);
         idx = idx === -1 ? 0 : idx;
         const prevIndex = idx - 1 >= 0 ? idx - 1 : queue.length - 1;
         setCurrentTrackIndex(prevIndex);

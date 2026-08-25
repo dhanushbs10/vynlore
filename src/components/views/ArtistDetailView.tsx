@@ -1,6 +1,7 @@
 import { useMemo, useCallback } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ArrowLeft, Play, Shuffle } from "lucide-react";
+import { motion } from "framer-motion";
 import { parseArtists } from "../../utils/artists";
 import { usePlayer } from "../../context/PlayerContext";
 import { formatDuration, hasCover } from "../../utils/format";
@@ -15,8 +16,7 @@ interface ArtistDetailViewProps {
 }
 
 export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDetailViewProps) {
-  const { currentTrack } = usePlayer();
-  const { isShuffle, toggleShuffle } = usePlayer();
+  const { currentTrack, isShuffle, toggleShuffle } = usePlayer();
 
   const artistTracks = useMemo(
     () => tracks.filter((t) => parseArtists(t.artist).includes(artist)),
@@ -60,66 +60,52 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
   }, [artistTracks, isShuffle, toggleShuffle, playTrack]);
 
   return (
-    <div>
-      <div className="view-header" style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 28 }}>
-        <button className="ctrl-btn" onClick={onBack} aria-label="Back to artists">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+      <div className="flex items-center gap-4 mb-7">
+        <button onClick={onBack} className="p-2 rounded-lg hover:bg-bg-hover text-text-secondary hover:text-text transition-colors" aria-label="Back to artists">
           <ArrowLeft size={18} />
         </button>
         <div>
-          <div className="view-title">{artist}</div>
-          <div className="view-subtitle">
+          <h1 className="font-display text-2xl font-bold text-text tracking-tight">{artist}</h1>
+          <p className="text-sm text-text-secondary mt-1">
             {artistTracks.length} tracks · {albumCount} albums · {formatDuration(totalDuration)}
-          </div>
+          </p>
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 32, marginBottom: 32, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ flexShrink: 0 }}>
+      <div className="flex gap-8 mb-8 items-start flex-wrap">
+        <div className="shrink-0">
           {coverSrc ? (
             <img
               src={coverSrc}
               alt={artist}
-              style={{
-                width: 220,
-                height: 220,
-                borderRadius: 12,
-                objectFit: "cover",
-                boxShadow: "0 16px 48px rgba(0,0,0,0.45)",
-              }}
+              className="w-[220px] h-[220px] rounded-xl object-cover shadow-[0_16px_48px_rgba(0,0,0,0.45)]"
             />
           ) : (
-            <div
-              style={{
-                width: 220,
-                height: 220,
-                borderRadius: 12,
-                background: "linear-gradient(145deg, #1c1f2b 0%, #252a38 100%)",
-                boxShadow: "0 16px 48px rgba(0,0,0,0.45)",
-              }}
-            />
+            <div className="w-[220px] h-[220px] rounded-xl bg-gradient-to-br from-bg-elevated to-bg-surface shadow-[0_16px_48px_rgba(0,0,0,0.45)]" />
           )}
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>{artist}</div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              className="ctrl-btn"
+        <div className="flex-1 min-w-0 flex flex-col gap-3">
+          <div className="text-[22px] font-bold text-text">{artist}</div>
+          <div className="flex gap-2.5">
+            <motion.button
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-bg-raised text-text-secondary text-xs font-semibold hover:bg-bg-hover hover:text-text transition-colors w-auto"
               onClick={handleShuffle}
+              whileTap={{ scale: 0.95 }}
               aria-label="Shuffle artist"
-              style={{ padding: "0 12px", gap: 8, width: "auto" }}
             >
               <Shuffle size={15} />
-              <span style={{ fontSize: 12, fontWeight: 600 }}>Shuffle</span>
-            </button>
-            <button
-              className="play-btn"
+              <span>Shuffle</span>
+            </motion.button>
+            <motion.button
+              className="w-11 h-11 rounded-full bg-accent text-bg flex items-center justify-center shadow-[0_0_20px_var(--color-accent-glow)] hover:scale-105 active:scale-95 transition-transform"
               onClick={handlePlayArtist}
-              style={{ width: 44, height: 44, background: "#d4a373", color: "#0c0d12" }}
+              whileTap={{ scale: 0.95 }}
               aria-label="Play artist"
             >
-              <Play size={18} fill="#0c0d12" />
-            </button>
+              <Play size={18} fill="currentColor" />
+            </motion.button>
           </div>
         </div>
       </div>
@@ -131,49 +117,30 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
             : undefined;
 
           return (
-            <div key={album} style={{ marginBottom: 32 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 16,
-                  marginBottom: 14,
-                  borderBottom: "1px solid var(--border-subtle)",
-                  paddingBottom: 10,
-                }}
-              >
+            <div key={album} className="mb-8">
+              <div className="flex items-center gap-4 mb-3.5 border-b border-border pb-2.5">
                 {albumCover ? (
                   <img
                     src={albumCover}
                     alt={album}
-                    style={{ width: 52, height: 52, borderRadius: 8, objectFit: "cover", boxShadow: "0 8px 20px rgba(0,0,0,0.35)" }}
+                    className="w-[52px] h-[52px] rounded-lg object-cover shadow-[0_8px_20px_rgba(0,0,0,0.35)]"
                   />
                 ) : (
-                  <div
-                    style={{
-                      width: 52,
-                      height: 52,
-                      borderRadius: 8,
-                      background: "var(--bg-raised)",
-                      flexShrink: 0,
-                    }}
-                  />
+                  <div className="w-[52px] h-[52px] rounded-lg bg-bg-raised shrink-0" />
                 )}
-                <div className="view-title" style={{ fontSize: 18, marginBottom: 0 }}>
-                  {album}
-                </div>
+                <div className="text-lg font-bold text-text">{album}</div>
               </div>
 
-              <div className="tracks-table">
-                <div className="tracks-row track-header">
-                  <div className="track-cell" style={{ width: 48 }} />
-                  <div className="track-cell">#</div>
-                  <div className="track-cell">Title</div>
-                  <div className="track-cell time-cell">TIME</div>
+              <div>
+                <div className="grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 text-xs font-medium text-text-muted uppercase tracking-wider">
+                  <div />
+                  <div>#</div>
+                  <div>Title</div>
+                  <div className="text-right">Time</div>
                 </div>
                 {albumTracks.length === 0 ? (
-                  <div className="empty-state">
-                    <div className="empty-state-text">No tracks found for this album.</div>
+                  <div className="text-center py-16 text-text-muted">
+                    <div className="text-sm text-text-secondary">No tracks found for this album.</div>
                   </div>
                 ) : (
                   albumTracks.map((track, idx) => {
@@ -184,21 +151,21 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
                     return (
                       <div
                         key={track.id}
-                        className={`tracks-row ${active ? "track-active" : ""}`}
+                        className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer hover:bg-bg-hover transition-colors ${active ? "bg-accent-soft" : ""}`}
                         onClick={() => playTrack(track, artistTracks)}
                       >
-                        <div className="track-cell" style={{ width: 48 }}>
+                        <div className="w-12">
                           {trackCover ? (
-                            <img className="track-thumb" src={trackCover} alt="" />
+                            <img className="w-10 h-10 rounded-md object-cover" src={trackCover} alt="" />
                           ) : (
-                            <div className="track-thumb-empty" />
+                            <div className="w-10 h-10 rounded-md bg-bg-surface" />
                           )}
                         </div>
-                        <div className="track-cell track-num">
-                          {active ? <span className="equalizer" /> : idx + 1}
+                        <div className="text-sm text-text-secondary text-center">
+                          {active ? <span className="eq-bars" /> : idx + 1}
                         </div>
-                        <div className="track-cell track-title">{track.title}</div>
-                        <div className="track-cell time-cell">{formatDuration(track.duration_secs)}</div>
+                        <div className="text-sm font-medium text-text truncate">{track.title}</div>
+                        <div className="text-sm text-text-muted tabular-nums text-right">{formatDuration(track.duration_secs)}</div>
                       </div>
                     );
                   })
@@ -208,6 +175,6 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
           );
         })}
       </div>
-    </div>
+    </motion.div>
   );
 }

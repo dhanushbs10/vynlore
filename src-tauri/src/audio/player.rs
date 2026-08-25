@@ -1,5 +1,6 @@
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -46,7 +47,7 @@ pub struct ControlBlock {
 
 	// Gapless chaining: when the callback has consumed up to a boundary count,
 	// playback has audibly crossed into the next queued file.
-	pub boundaries: Mutex<Vec<i64>>,
+	pub boundaries: Mutex<VecDeque<i64>>,
 	pub has_boundary: AtomicBool,
 	pub pending_change: AtomicBool,
 
@@ -55,7 +56,7 @@ pub struct ControlBlock {
 }
 
 impl ControlBlock {
-	fn boundaries_lock(&self) -> std::sync::MutexGuard<'_, Vec<i64>> {
+	fn boundaries_lock(&self) -> std::sync::MutexGuard<'_, VecDeque<i64>> {
 		self.boundaries.lock().unwrap()
 	}
 
@@ -80,9 +81,9 @@ impl ControlBlock {
 		}
 		let mut boundaries = self.boundaries_lock();
 		let mut crossed = false;
-		while let Some(front) = boundaries.first().copied() {
+		while let Some(front) = boundaries.front().copied() {
 			if played >= front {
-				boundaries.remove(0);
+				boundaries.pop_front();
 				self.track_start_frame.store(front, Ordering::Relaxed);
 				crossed = true;
 			} else {
@@ -185,6 +186,9 @@ pub fn start(
 	exclusive: bool,
 	volume_bits: Arc<std::sync::atomic::AtomicU32>,
 	eq: crate::audio::eq::SharedEq,
+	spectrum: Arc<crate::audio::spectrum::SpectrumAnalyzer>,
+	balance: Arc<AtomicU32>,
+	preamp: Arc<AtomicU32>,
 	app: AppHandle,
 	initial_seek: f64,
 ) -> Result<(PlaybackHandle, bool), String> {
@@ -225,7 +229,7 @@ pub fn start(
 	));
 
 	let file_bit_depth = format.bit_depth;
-	let mut pipeline = Pipeline::new(decoder, format, out_rate, eq.clone())?;
+	let mut pipeline = Pipeline::new(decoder, format, out_rate, eq.clone(), preamp.clone())?;
 	if initial_seek > 0.0 {
 		pipeline.seek(initial_seek);
 	}
@@ -247,7 +251,7 @@ pub fn start(
 		frames_played: AtomicI64::new(0),
 		track_start_frame: AtomicI64::new(start_offset_frames),
 		frames_pushed: AtomicU64::new(0),
-		boundaries: Mutex::new(Vec::new()),
+		boundaries: Mutex::new(VecDeque::new()),
 		has_boundary: AtomicBool::new(false),
 		pending_change: AtomicBool::new(false),
 		next_file: Mutex::new(None),
@@ -270,6 +274,8 @@ pub fn start(
 				queue.clone(),
 				control.clone(),
 				volume_bits.clone(),
+				spectrum.clone(),
+				balance.clone(),
 			) {
 				Ok(s) => Backend::Wasapi(s),
 				Err(e) => return Err(format!("exclusive init failed: {}", e)),
@@ -280,10 +286,14 @@ pub fn start(
 			unreachable!("exclusive path only compiled on windows");
 		}
 	} else {
-		let (device, stream_config) = shared.as_ref().expect("shared setup present");
+		let (device, stream_config) = shared.as_ref().unwrap_or_else(|| {
+			panic!("shared audio device setup must be initialized before starting shared backend")
+		});
 		let cb_control = control.clone();
 		let cb_queue = queue.clone();
 		let cb_volume = volume_bits.clone();
+		let cb_balance = balance.clone();
+		let cb_spectrum = spectrum.clone();
 		let audio_output = AudioOutput::start(stream_config, device, move |out_buf| {
 			if cb_control.paused.load(Ordering::Relaxed) {
 				out_buf.fill(0.0);
@@ -299,9 +309,19 @@ pub fn start(
 				for sample in out_buf[..written].iter_mut() {
 					*sample *= vol;
 				}
+				let ch_count = cb_control.output_channels.max(1) as usize;
+				let bal = f32::from_bits(cb_balance.load(Ordering::Relaxed));
+				if bal.abs() > 0.01 {
+					let left_gain = if bal <= 0.0 { 1.0 } else { 1.0 - bal };
+					let right_gain = if bal >= 0.0 { 1.0 } else { 1.0 + bal };
+					for frame in out_buf[..written].chunks_exact_mut(ch_count) {
+						if ch_count >= 1 { frame[0] *= left_gain; }
+						if ch_count >= 2 { frame[1] *= right_gain; }
+					}
+				}
+				cb_spectrum.push_samples(&out_buf[..written]);
 				// written counts interleaved SAMPLES; consume_frames wants frames.
-				let ch = cb_control.output_channels.max(1) as usize;
-				cb_control.consume_frames((written / ch) as i64);
+				cb_control.consume_frames((written / ch_count) as i64);
 			}
 		})
 		.map_err(|e| e.to_string())?;
@@ -310,10 +330,11 @@ pub fn start(
 
 	let thread_control = control.clone();
 	let thread_queue = queue.clone();
+	let thread_preamp = preamp.clone();
 	std::thread::Builder::new()
 		.name("vynlore-decode".into())
 		.spawn(move || {
-			run_decoder(pipeline, thread_control, thread_queue, eq, app);
+			run_decoder(pipeline, thread_control, thread_queue, eq, thread_preamp, app);
 		})
 		.map_err(|e| format!("failed to spawn decode thread: {}", e))?;
 
@@ -346,6 +367,7 @@ struct Pipeline {
 	pending: Vec<f32>,
 	scratch: Vec<f32>,
 	eq: crate::audio::eq::EqProcessor,
+	preamp: Arc<AtomicU32>,
 	eof: bool,
 	tail_flushed: bool,
 }
@@ -361,6 +383,7 @@ impl Pipeline {
 		format: AudioFormat,
 		out_rate: u32,
 		eq: crate::audio::eq::SharedEq,
+		preamp: Arc<AtomicU32>,
 	) -> Result<Self, String> {
 		let resampler = if format.sample_rate != out_rate {
 			let params = SincInterpolationParameters {
@@ -387,6 +410,7 @@ impl Pipeline {
 			pending: Vec::new(),
 			scratch: Vec::new(),
 			eq: eq_processor,
+			preamp,
 			eof: false,
 			tail_flushed: false,
 		})
@@ -420,6 +444,7 @@ impl Pipeline {
 	fn pump(&mut self, queue: &SampleQueue) -> Pushed {
 		let ch = self.format.channels as usize;
 		let available_frames = self.pending.len() / ch;
+		let preamp_gain = f32::from_bits(self.preamp.load(Ordering::Relaxed));
 
 		match self.resampler.as_mut() {
 			Some(r) => {
@@ -437,6 +462,7 @@ impl Pipeline {
 						Ok(out) => {
 							let out_frames = out.first().map_or(0, |c| c.len());
 							interleave(&out, out_frames, &mut self.scratch);
+							apply_gain(preamp_gain, &mut self.scratch);
 							self.eq.process_interleaved(&mut self.scratch);
 							if queue.push_all(&self.scratch) {
 								Pushed::Frames(out_frames as u64)
@@ -457,6 +483,7 @@ impl Pipeline {
 				if !self.pending.is_empty() {
 					let mut data = std::mem::take(&mut self.pending);
 					let frames = data.len() / ch;
+					apply_gain(preamp_gain, &mut data);
 					self.eq.process_interleaved(&mut data);
 					if queue.push_all(&data) {
 						Pushed::Frames(frames as u64)
@@ -479,6 +506,7 @@ impl Pipeline {
 		let ch = self.format.channels as usize;
 		let available_frames = self.pending.len() / ch;
 		let mut total: u64 = 0;
+		let preamp_gain = f32::from_bits(self.preamp.load(Ordering::Relaxed));
 
 		if let Some(r) = self.resampler.as_mut() {
 			if available_frames > 0 {
@@ -495,6 +523,7 @@ impl Pipeline {
 					Ok(out) => {
 						let out_frames = out.first().map_or(0, |c| c.len());
 						interleave(&out, out_frames, &mut self.scratch);
+						apply_gain(preamp_gain, &mut self.scratch);
 						self.eq.process_interleaved(&mut self.scratch);
 						if !queue.push_all(&self.scratch) {
 							self.tail_flushed = true;
@@ -513,6 +542,7 @@ impl Pipeline {
 							break;
 						}
 						interleave(&out, out_frames, &mut self.scratch);
+						apply_gain(preamp_gain, &mut self.scratch);
 						self.eq.process_interleaved(&mut self.scratch);
 						if !queue.push_all(&self.scratch) {
 							break;
@@ -525,6 +555,7 @@ impl Pipeline {
 		} else if !self.pending.is_empty() {
 			let mut data = std::mem::take(&mut self.pending);
 			let frames = data.len() / ch;
+			apply_gain(preamp_gain, &mut data);
 			self.eq.process_interleaved(&mut data);
 			if !queue.push_all(&data) {
 				self.tail_flushed = true;
@@ -537,13 +568,22 @@ impl Pipeline {
 	}
 }
 
+fn apply_gain(gain: f32, data: &mut [f32]) {
+	let g = gain.max(0.001);
+	if (g - 1.0).abs() > 1e-6 {
+		for sample in data.iter_mut() {
+			*sample *= g;
+		}
+	}
+}
+
 enum ChainResult {
 	Chained(Box<Pipeline>),
 	Incompatible,
 	NoneQueued,
 }
 
-fn try_chain(control: &Arc<ControlBlock>, out_rate: u32, eq: crate::audio::eq::SharedEq) -> ChainResult {
+fn try_chain(control: &Arc<ControlBlock>, out_rate: u32, eq: crate::audio::eq::SharedEq, preamp: Arc<AtomicU32>) -> ChainResult {
 	let next = control.next_file.lock().unwrap().take();
 	let Some(next_path) = next else {
 		return ChainResult::NoneQueued;
@@ -554,10 +594,10 @@ fn try_chain(control: &Arc<ControlBlock>, out_rate: u32, eq: crate::audio::eq::S
 			// callback compares consumption against this marker and flips the
 			// audible position exactly when the new audio starts.
 			let mark = control.frames_pushed.load(Ordering::Relaxed) as i64;
-			control.boundaries_lock().push(mark);
+            control.boundaries_lock().push_back(mark);
 			control.has_boundary.store(true, Ordering::Relaxed);
 			*control.current_file.lock().unwrap() = next_path;
-			match Pipeline::new(decoder, format, out_rate, eq) {
+			match Pipeline::new(decoder, format, out_rate, eq, preamp) {
 				Ok(p) => ChainResult::Chained(Box::new(p)),
 				Err(e) => {
 					eprintln!("gapless chain failed: {}", e);
@@ -582,6 +622,7 @@ fn run_decoder(
 	control: Arc<ControlBlock>,
 	queue: Arc<SampleQueue>,
 	eq: crate::audio::eq::SharedEq,
+	preamp: Arc<AtomicU32>,
 	app: AppHandle,
 ) {
 	let out_rate = control.output_rate;
@@ -626,7 +667,7 @@ fn run_decoder(
 			// Fast path: a next track was armed before we got here — splice
 			// immediately, no drain wait needed (FIFO order preserves audio
 			// continuity; the boundary marker handles position/UI switching).
-			match try_chain(&control, out_rate, eq.clone()) {
+			match try_chain(&control, out_rate, eq.clone(), preamp.clone()) {
 				ChainResult::Chained(next_pipeline) => {
 					pipeline = *next_pipeline;
 					continue 'outer;
@@ -647,7 +688,7 @@ fn run_decoder(
 					let _ = app.emit("track-changed", TrackChangedPayload { path });
 				}
 				if control.next_file.lock().unwrap().is_some() {
-					match try_chain(&control, out_rate, eq.clone()) {
+					match try_chain(&control, out_rate, eq.clone(), preamp.clone()) {
 						ChainResult::Chained(p) => {
 							late_chained = Some(p);
 							break;

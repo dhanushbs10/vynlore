@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { motion } from "framer-motion";
 import { hasCover } from "../../utils/format";
 import type { Track } from "../../types";
 
@@ -45,63 +46,57 @@ export function GenresView({ tracks, onGenreClick }: GenresViewProps) {
 
   if (genres.length === 0) {
     return (
-      <div>
-        <div className="view-header">
-          <div className="view-title">Genres</div>
-          <div className="view-subtitle">No genres found</div>
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+        <div className="mb-6">
+          <h1 className="font-display text-2xl font-bold text-text tracking-tight">Genres</h1>
+          <p className="text-sm text-text-secondary mt-1">No genres found</p>
         </div>
-        <div className="empty-state">
-          <div className="empty-state-text">
-            No tracks have genre metadata. Add music with genre tags to see them here.
-          </div>
+        <div className="text-center py-16 text-text-muted">
+          <div className="text-sm text-text-secondary">No tracks have genre metadata. Add music with genre tags to see them here.</div>
         </div>
-      </div>
+      </motion.div>
     );
   }
 
   return (
-    <div>
-      <div className="view-header">
-        <div className="view-title">Genres</div>
-        <div className="view-subtitle">{genres.length} genres</div>
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+      <div className="mb-6">
+        <h1 className="font-display text-2xl font-bold text-text tracking-tight">Genres</h1>
+        <p className="text-sm text-text-secondary mt-1">{genres.length} genres</p>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-          gap: 16,
-        }}
+      <motion.div
+        className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4"
+        variants={{ show: { transition: { staggerChildren: 0.03 } } }}
+        initial="hidden"
+        animate="show"
       >
         {genres.map((genre) => {
           const coverSrc = genreCovers[genre];
           return (
-            <div
+            <motion.div
               key={genre}
-              className="artist-card"
+              variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+              whileHover={{ y: -3, transition: { type: "spring", stiffness: 400, damping: 25 } }}
+              className="flex flex-col items-center gap-3 p-4 rounded-xl cursor-pointer group"
               onClick={() => onGenreClick(genre)}
-              style={{ cursor: "pointer" }}
             >
               {coverSrc ? (
                 <img
-                  className="album-art-img"
+                  className="w-[100px] h-[100px] rounded-xl object-cover shadow-lg group-hover:shadow-xl transition-shadow"
                   src={coverSrc}
                   alt={genre}
-                  style={{ width: 100, height: 100, margin: "0 auto", display: "block" }}
                 />
               ) : (
-                <div
-                  className="artist-art-placeholder"
-                  style={{ width: 100, height: 100, margin: "0 auto" }}
-                >
+                <div className="w-[100px] h-[100px] rounded-xl bg-bg-surface flex items-center justify-center text-2xl font-bold text-text-muted">
                   {genre.charAt(0).toUpperCase()}
                 </div>
               )}
-              <div className="artist-name" style={{ textAlign: "center" }}>{genre}</div>
-            </div>
+              <div className="text-sm font-medium text-text text-center">{genre}</div>
+            </motion.div>
           );
         })}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

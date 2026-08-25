@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { motion, AnimatePresence } from "framer-motion";
 import { Music2, User, Disc3, Tag, Search } from "lucide-react";
 import { hasCover } from "../utils/format";
 import { parseArtists } from "../utils/artists";
@@ -126,7 +127,7 @@ export function SearchPalette({
 	useEffect(() => setActiveIdx(0), [query]);
 
 	useEffect(() => {
-		const el = listRef.current?.querySelector(".sp-item.active");
+		const el = listRef.current?.querySelector("[data-active]");
 		el?.scrollIntoView({ block: "nearest" });
 	}, [activeIdx]);
 
@@ -165,66 +166,81 @@ export function SearchPalette({
 		}
 	};
 
-	let runningIdx = -1;
-
 	return (
-		<div className="sp-backdrop" onMouseDown={actions.onClose}>
-			<div className="sp-panel" onMouseDown={(e) => e.stopPropagation()}>
-				<div className="sp-input-row">
-					<Search size={16} />
-					<input
-						ref={inputRef}
-						className="sp-input"
-						placeholder="Search tracks, artists, albums, genres…"
-						value={query}
-						onChange={(e) => setQuery(e.target.value)}
-						onKeyDown={onKeyDown}
-					/>
-					<span className="sp-kbd">ESC</span>
-				</div>
-				<div className="sp-list" ref={listRef}>
-					{flat.length === 0 ? (
-						<div className="sp-empty">
-							{query.trim() ? "No results" : "Type to search your library"}
-						</div>
-					) : (
-						GROUP_ORDER.map((kind) => {
-							const items = groups.get(kind);
-							if (!items?.length) return null;
-							const Icon = KIND_ICON[kind];
-							return (
-								<div key={kind}>
-									<div className="sp-group-label">{KIND_LABEL[kind]}</div>
-									{items.map((item) => {
-										runningIdx += 1;
-										const idx = runningIdx;
-										return (
-											<div
-												key={item.key}
-												className={`sp-item ${idx === activeIdx ? "active" : ""}`}
-												onMouseEnter={() => setActiveIdx(idx)}
-												onClick={() => activate(item)}
-											>
-												{item.cover ? (
-													<img className="sp-thumb" src={item.cover} alt="" />
-												) : (
-													<div className="sp-thumb sp-thumb-empty">
-														<Icon size={14} />
+		<AnimatePresence>
+			<motion.div
+				initial={{ opacity: 0 }}
+				animate={{ opacity: 1 }}
+				exit={{ opacity: 0 }}
+				className="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex justify-center pt-[12vh]"
+				onMouseDown={actions.onClose}
+			>
+				<motion.div
+					initial={{ opacity: 0, scale: 0.95, y: 10 }}
+					animate={{ opacity: 1, scale: 1, y: 0 }}
+					exit={{ opacity: 0, scale: 0.95, y: 10 }}
+					transition={{ type: "spring", stiffness: 400, damping: 30 }}
+					className="w-[min(640px,90vw)] max-h-[62vh] bg-bg-elevated border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+					onMouseDown={(e) => e.stopPropagation()}
+				>
+					<div className="flex items-center gap-3 px-5 py-4 border-b border-border">
+						<Search size={16} className="text-text-muted shrink-0" />
+						<input
+							ref={inputRef}
+							className="flex-1 bg-transparent border-none outline-none text-text text-[15px] placeholder:text-text-muted"
+							placeholder="Search tracks, artists, albums, genres…"
+							value={query}
+							onChange={(e) => setQuery(e.target.value)}
+							onKeyDown={onKeyDown}
+						/>
+						<span className="text-[10px] font-semibold text-text-muted border border-border-hover rounded px-1.5 py-0.5 shrink-0">ESC</span>
+					</div>
+					<div className="overflow-y-auto p-2" ref={listRef}>
+						{flat.length === 0 ? (
+							<div className="px-4 py-8 text-center text-text-muted text-sm">
+								{query.trim() ? "No results" : "Type to search your library"}
+							</div>
+						) : (
+							GROUP_ORDER.map((kind) => {
+								const items = groups.get(kind);
+								if (!items?.length) return null;
+								const Icon = KIND_ICON[kind];
+								return (
+									<div key={kind}>
+										<div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-text-muted px-2.5 pt-2.5 pb-1">{KIND_LABEL[kind]}</div>
+										{items.map((item) => {
+											const idx = flat.indexOf(item);
+											const isActive = idx === activeIdx;
+											return (
+												<motion.div
+													key={item.key}
+													whileTap={{ scale: 0.97 }}
+													className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-bg-hover transition-colors ${isActive ? "bg-accent-soft" : ""}`}
+													data-active={isActive ? "" : undefined}
+													onMouseEnter={() => setActiveIdx(idx)}
+													onClick={() => activate(item)}
+												>
+													{item.cover ? (
+														<img className="w-9 h-9 rounded-lg object-cover shrink-0" src={item.cover} alt="" />
+													) : (
+														<div className="w-9 h-9 rounded-lg bg-bg-surface flex items-center justify-center text-text-muted shrink-0">
+															<Icon size={14} />
+														</div>
+													)}
+													<div className="min-w-0">
+														<div className="text-[13.5px] text-text truncate">{item.title}</div>
+														<div className="text-[11.5px] text-text-muted truncate">{item.subtitle}</div>
 													</div>
-												)}
-												<div className="sp-texts">
-													<div className="sp-title">{item.title}</div>
-													<div className="sp-sub">{item.subtitle}</div>
-												</div>
-											</div>
-										);
-									})}
-								</div>
-							);
-						})
-					)}
-				</div>
-			</div>
-		</div>
+												</motion.div>
+											);
+										})}
+									</div>
+								);
+							})
+						)}
+					</div>
+				</motion.div>
+			</motion.div>
+		</AnimatePresence>
 	);
 }

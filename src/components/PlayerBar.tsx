@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
 import { formatDuration } from "../utils/format";
 import { Play, Pause, SkipBack, SkipForward, Volume2, ListMusic, Repeat, Repeat1, Heart, ListPlus, Zap } from "lucide-react";
@@ -27,6 +28,18 @@ playPrev,
 const [isLiked, setIsLiked] = useState(false);
 const [showPlaylistDropdown, setShowPlaylistDropdown] = useState(false);
 const [playlists, setPlaylists] = useState<{ id: number; name: string }[]>([]);
+const playlistDropdownRef = useRef<HTMLDivElement>(null);
+
+useEffect(() => {
+  if (!showPlaylistDropdown) return;
+  const handleClick = (e: MouseEvent) => {
+    if (playlistDropdownRef.current && !playlistDropdownRef.current.contains(e.target as Node)) {
+      setShowPlaylistDropdown(false);
+    }
+  };
+  document.addEventListener("mousedown", handleClick);
+  return () => document.removeEventListener("mousedown", handleClick);
+}, [showPlaylistDropdown]);
 
 useEffect(() => {
 if (!currentTrack) return;
@@ -71,7 +84,11 @@ console.error("Failed to load playlists:", err);
 
 const handleAddToPlaylist = async (playlistId: number) => {
 if (!currentTrack) return;
-await invoke("add_track_to_playlist", { playlistId, trackId: currentTrack.id });
+try {
+  await invoke("add_track_to_playlist", { playlistId, trackId: currentTrack.id });
+} catch (err) {
+  console.error("Failed to add to playlist:", err);
+}
 setShowPlaylistDropdown(false);
 };
 
@@ -94,206 +111,150 @@ const formatLabel = currentTrack
   ].join(" ")
 : "";
 
-const repeatColor = repeatMode === "off" ? "var(--text-tertiary)" : "var(--accent-warm)";
-const exclusiveColor = exclusiveEnabled ? "var(--accent-warm)" : "var(--text-tertiary)";
-
 return (
-<div className="player-bar-container">
-<div className="progress-track" onClick={handleSeek}>
-<div className="progress-fill" style={{ width: `${pct}%` }} />
-<div className="progress-thumb" style={{ left: `${pct}%` }} />
-</div>
+<motion.div
+  initial={{ y: 92 }}
+  animate={{ y: 0 }}
+  transition={{ type: "spring", stiffness: 300, damping: 30 }}
+  className="fixed bottom-0 left-0 right-0 h-[92px] bg-black/60 backdrop-blur-xl border-t border-border z-[100]"
+>
+  <div className="absolute top-0 left-0 right-0 h-[6px] cursor-pointer group hover:h-[7px] transition-all" onClick={handleSeek}>
+    <div className="absolute inset-0 bg-white/[0.08]" />
+    <div className="absolute top-0 left-0 bottom-0 bg-gradient-to-r from-violet-500 to-accent rounded-r pointer-events-none" style={{ width: `${pct}%` }} />
+    <div className="absolute top-1/2 w-3 h-3 bg-accent rounded-full -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100 transition-all pointer-events-none shadow-[0_0_8px_var(--color-accent-glow)]" style={{ left: `${pct}%` }} />
+  </div>
 
-<div className="player-bar-inner">
-<div className="track-info-left">
-  {coverSrc ? (
-    <div
-      onClick={() => onExpandCurrentTrack?.()}
-      style={{ cursor: "pointer", borderRadius: 4, overflow: "hidden" }}
-    >
-      <img
-        src={coverSrc}
-        alt=""
-        style={{ width: 38, height: 38, borderRadius: 4, objectFit: "cover", display: "block" }}
+  <div className="flex items-center justify-between h-full px-6">
+    <div className="flex items-center gap-3 min-w-0 flex-1">
+      {coverSrc ? (
+        <div
+          onClick={() => onExpandCurrentTrack?.()}
+          className="cursor-pointer rounded overflow-hidden shrink-0"
+        >
+          <img
+            src={coverSrc}
+            alt=""
+            className="w-[38px] h-[38px] rounded object-cover block"
+          />
+        </div>
+      ) : (
+        <div
+          onClick={() => onExpandCurrentTrack?.()}
+          className="cursor-pointer w-[38px] h-[38px] rounded bg-bg-raised shrink-0"
+        />
+      )}
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-text truncate">{currentTrack?.title || "Not Playing"}</span>
+          <button
+            onClick={handleToggleLike}
+            aria-label={isLiked ? "Unlike" : "Like"}
+            className={`inline-flex items-center bg-transparent border-none cursor-pointer p-0 ${isLiked ? "text-accent" : "text-text-muted"}`}
+          >
+            <Heart size={16} fill={isLiked ? "currentColor" : "none"} />
+          </button>
+          <div className="relative" ref={playlistDropdownRef}>
+          <button
+            onClick={handleAddToPlaylistClick}
+            aria-label="Add to playlist"
+            className="inline-flex items-center bg-transparent border-none cursor-pointer p-0 text-text-muted"
+          >
+            <ListPlus size={15} />
+          </button>
+            {showPlaylistDropdown && (
+              <div className="absolute bottom-full right-0 mb-2 bg-bg-raised border border-border rounded-md p-1 min-w-[160px] z-[1000] shadow-lg shadow-black/50">
+                {playlists.map((p) => (
+                  <motion.div
+                    key={p.id}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => {
+                      void handleAddToPlaylist(p.id);
+                    }}
+                    className="px-3 py-2 cursor-pointer text-text rounded text-[13px] hover:bg-bg-hover transition-colors"
+                  >
+                    {p.name}
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="text-[11px] text-text-secondary truncate">{currentTrack?.album || ""}</div>
+        <div className="text-[11px] text-text-muted truncate">{currentTrack?.artist || ""}</div>
+      </div>
+    </div>
+
+    <div className="flex items-center gap-1">
+      <button className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border-none bg-transparent p-0 cursor-pointer transition-colors ${isShuffle ? "text-accent" : "text-text-secondary hover:text-text hover:bg-bg-hover"}`} aria-label="Shuffle" onClick={toggleShuffle}>
+        <ListMusic size={15} />
+      </button>
+      <button className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-secondary hover:text-text hover:bg-bg-hover border-none bg-transparent p-0 cursor-pointer transition-colors" aria-label="Previous" onClick={playPrev}>
+        <SkipBack size={15} />
+      </button>
+      <motion.button
+        whileTap={{ scale: 0.95 }}
+        className="w-11 h-11 rounded-full bg-accent text-bg inline-flex items-center justify-center cursor-pointer border-none shadow-[0_0_20px_var(--color-accent-glow)] hover:scale-105 active:scale-95 transition-transform"
+        onClick={() => {
+          if (!currentTrack) return;
+          togglePlayPause();
+        }}
+        aria-label={isPlaying ? "Pause" : "Play"}
+      >
+        {isPlaying && !isPaused ? <Pause size={16} /> : <Play size={16} />}
+      </motion.button>
+      <button className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-secondary hover:text-text hover:bg-bg-hover border-none bg-transparent p-0 cursor-pointer transition-colors" aria-label="Next" onClick={playNext}>
+        <SkipForward size={15} />
+      </button>
+      <button
+        className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border-none bg-transparent p-0 cursor-pointer transition-colors relative ${repeatMode === "off" ? "text-text-muted" : "text-accent"}`}
+        aria-label="Repeat"
+        onClick={toggleRepeat}
+      >
+        {repeatMode === "one" ? <Repeat1 size={15} /> : <Repeat size={15} />}
+        {repeatMode === "one" && (
+          <span className="absolute top-0.5 right-0.5 text-[7px] font-extrabold leading-none text-accent pointer-events-none">
+            1
+          </span>
+        )}
+      </button>
+    </div>
+
+    <div className="flex items-center gap-3 flex-1 justify-end">
+      <button
+        onClick={toggleExclusive}
+        title={
+          exclusiveEnabled
+            ? exclusiveActive
+              ? "Bit-perfect exclusive mode active — click to disable"
+              : "Exclusive mode on, but this track's format isn't supported by the device — playing shared"
+            : "Enable bit-perfect exclusive output"
+        }
+        className="flex items-center bg-transparent border-none cursor-pointer p-0.5 relative"
+      >
+        <Zap size={13} className={exclusiveEnabled ? "text-accent" : "text-text-muted"} fill={exclusiveActive ? "currentColor" : "none"} />
+        {exclusiveActive && (
+          <span className="ml-[3px] text-[8px] font-extrabold tracking-wider text-accent">
+            EXCL
+          </span>
+        )}
+      </button>
+      <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase bg-bg-surface text-text-muted rounded border border-border">
+        {formatLabel}
+      </span>
+      <span className="text-xs text-text-secondary tabular-nums min-w-[84px] text-center">
+        {formatDuration(currentTime)} / {formatDuration(currentTrack?.duration_secs ?? 0)}
+      </span>
+      <Volume2 size={13} className="text-text-secondary" />
+      <input
+        type="range"
+        min="0"
+        max="100"
+        value={Math.round(volume * 100)}
+        onChange={(e) => setVolume(Number(e.target.value) / 100)}
+        className="w-24 volume-slider"
       />
     </div>
-  ) : (
-    <div
-      onClick={() => onExpandCurrentTrack?.()}
-      style={{ cursor: "pointer", width: 38, height: 38, borderRadius: 4, background: "var(--bg-raised)" }}
-    />
-  )}
-  <div>
-<div className="track-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-{currentTrack?.title || "Not Playing"}
-<button
-onClick={handleToggleLike}
-aria-label={isLiked ? "Unlike" : "Like"}
-style={{
-background: "none",
-border: "none",
-cursor: "pointer",
-padding: 0,
-display: "inline-flex",
-alignItems: "center",
-color: isLiked ? "var(--accent-warm)" : "var(--text-tertiary)",
-}}
->
-<Heart size={16} fill={isLiked ? "var(--accent-warm)" : "none"} />
-</button>
-<button
-onClick={handleAddToPlaylistClick}
-aria-label="Add to playlist"
-style={{
-background: "none",
-border: "none",
-cursor: "pointer",
-padding: 0,
-display: "inline-flex",
-alignItems: "center",
-color: "var(--text-tertiary)",
-position: "relative",
-}}
->
-<ListPlus size={15} />
-{showPlaylistDropdown && (
-<div
-style={{
-position: "absolute",
-bottom: 60,
-right: 0,
-background: "var(--bg-raised)",
-border: "1px solid var(--border-medium)",
-borderRadius: 6,
-padding: 4,
-minWidth: 160,
-zIndex: 1000,
-boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-}}
->
-{playlists.map((p) => (
-<div
-key={p.id}
-onClick={() => {
-void handleAddToPlaylist(p.id);
-}}
-style={{
-padding: "8px 12px",
-cursor: "pointer",
-color: "var(--text-primary)",
-borderRadius: 4,
-fontSize: 13,
-}}
-onMouseEnter={(e) => {
-(e.target as HTMLDivElement).style.background = "var(--bg-hover)";
-}}
-onMouseLeave={(e) => {
-(e.target as HTMLDivElement).style.background = "transparent";
-}}
->
-{p.name}
-</div>
-))}
-</div>
-)}
-</button>
-</div>
-<div style={{ fontSize: "11px", color: "var(--text-secondary)" }}>{currentTrack?.album || ""}</div>
-<div style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>{currentTrack?.artist || ""}</div>
-</div>
-</div>
-
-<div className="center-controls">
-<button className="ctrl-btn icon-only" aria-label="Shuffle" onClick={toggleShuffle} style={{ color: isShuffle ? "var(--accent)" : "var(--text-tertiary)" }}>
-<ListMusic size={15} />
-</button>
-<button className="ctrl-btn icon-only" aria-label="Previous" onClick={playPrev}>
-<SkipBack size={15} />
-</button>
-<button
-className="play-btn"
-onClick={() => {
-if (!currentTrack) return;
-togglePlayPause();
-}}
-aria-label={isPlaying ? "Pause" : "Play"}
->
-{isPlaying && !isPaused ? <Pause size={16} /> : <Play size={16} />}
-</button>
-<button className="ctrl-btn icon-only" aria-label="Next" onClick={playNext}>
-<SkipForward size={15} />
-</button>
-<button className="ctrl-btn icon-only" aria-label="Repeat" onClick={toggleRepeat} style={{ color: repeatColor, position: "relative" }}>
-{repeatMode === "one" ? <Repeat1 size={15} /> : <Repeat size={15} />}
-{repeatMode === "one" && (
-<span
-style={{
-position: "absolute",
-top: 2,
-right: 2,
-fontSize: 7,
-fontWeight: 800,
-lineHeight: 1,
-color: "var(--accent-warm)",
-pointerEvents: "none",
-}}
->
-1
-</span>
-)}
-</button>
-</div>
-
-<div className="right-controls">
-<button
-  onClick={toggleExclusive}
-  title={
-    exclusiveEnabled
-      ? exclusiveActive
-        ? "Bit-perfect exclusive mode active — click to disable"
-        : "Exclusive mode on, but this track's format isn't supported by the device — playing shared"
-      : "Enable bit-perfect exclusive output"
-  }
-  style={{
-    background: "none",
-    border: "none",
-    cursor: "pointer",
-    padding: 2,
-    display: "flex",
-    alignItems: "center",
-    position: "relative",
-  }}
->
-  <Zap size={13} style={{ color: exclusiveColor }} fill={exclusiveActive ? "var(--accent-warm)" : "none"} />
-  {exclusiveActive && (
-    <span
-      style={{
-        marginLeft: 3,
-        fontSize: 8,
-        fontWeight: 800,
-        letterSpacing: 0.5,
-        color: "var(--accent-warm)",
-      }}
-    >
-      EXCL
-    </span>
-  )}
-</button>
-<span className="format-badge-sm">{formatLabel}</span>
-<span className="time-display">
-{formatDuration(currentTime)} / {formatDuration(currentTrack?.duration_secs ?? 0)}
-</span>
-<Volume2 size={13} style={{ color: "var(--text-secondary)" }} />
-<input
-type="range"
-min="0"
-max="100"
-value={Math.round(volume * 100)}
-onChange={(e) => setVolume(Number(e.target.value) / 100)}
-className="volume-slider"
-/>
-</div>
-</div>
-</div>
+  </div>
+</motion.div>
 );
 }
