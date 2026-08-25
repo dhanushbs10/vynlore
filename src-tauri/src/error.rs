@@ -6,7 +6,6 @@ pub enum AudioError {
     OutputError(String),
     FileError(String),
     ConfigError(String),
-    ResampleError(String),
 }
 
 impl fmt::Display for AudioError {
@@ -16,7 +15,6 @@ impl fmt::Display for AudioError {
             AudioError::OutputError(msg) => write!(f, "Audio output error: {}", msg),
             AudioError::FileError(msg) => write!(f, "File error: {}", msg),
             AudioError::ConfigError(msg) => write!(f, "Configuration error: {}", msg),
-            AudioError::ResampleError(msg) => write!(f, "Resample error: {}", msg),
         }
     }
 }

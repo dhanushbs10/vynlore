@@ -6,22 +6,40 @@ edition = "2021"
 
 [dependencies]
 cpal = "0.15"
-symphonia = { version = "0.5", features = ["flac"] }
+symphonia = { version = "0.5", features = [
+  "flac",
+  "wav",
+  "pcm",
+  "aiff",
+  "adpcm",
+  "mp3",
+  "aac",
+  "alac",
+  "isomp4",
+  "ogg",
+  "vorbis",
+] }
 rubato = "0.14"
-rusqlite = { version = "0.30", features = ["bundled", "chrono"] }
-chrono = "0.4"
+rusqlite = { version = "0.30", features = ["bundled"] }
 lofty = "0.8"
 walkdir = "2.5"
-anyhow = "1.0"
-log = "0.4"
-env_logger = "0.10"
-clap = { version = "4.0", features = ["derive"] }
 notify = "8.2.0"
 dirs = "5.0"
 tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_Media_KernelStreaming",
+  "Win32_Security",
+  "Win32_System_Com",
+  "Win32_System_Threading",
+] }
 
 [profile.release]
 opt-level = 3

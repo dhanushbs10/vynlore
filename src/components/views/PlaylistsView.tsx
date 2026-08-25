@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { Track } from "../../types";
 
 interface Playlist {
 id: number;
@@ -8,8 +9,8 @@ track_count: number;
 }
 
 interface PlaylistsViewProps {
-  _libraryTracks: any[];
-  _playTrack: (track: any, queue?: any[]) => void;
+  _libraryTracks: Track[];
+  _playTrack: (track: Track, queue?: Track[]) => void;
   onPlaylistClick: (playlistId: number) => void;
 }
 

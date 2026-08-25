@@ -1,30 +1,16 @@
 import { useMemo, useCallback } from "react";
-import { Track } from "../../App";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePlayer } from "../../context/PlayerContext";
 import { ArrowLeft, Play, Shuffle } from "lucide-react";
+import { formatDuration, hasCover } from "../../utils/format";
+import { fisherYates } from "../../utils/shuffle";
+import type { Track } from "../../types";
 
 interface GenreDetailViewProps {
   genre: string;
   tracks: Track[];
   onBack: () => void;
   playTrack: (track: Track, queue?: Track[]) => void;
-}
-
-function fmt(s: number): string {
-  if (s <= 0) return "0:00";
-  const m = Math.floor(s / 60);
-  const r = Math.floor(s % 60);
-  return `${m}:${r.toString().padStart(2, "0")}`;
-}
-
-function fisherYates<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
 }
 
 export function GenreDetailView({
@@ -105,10 +91,9 @@ export function GenreDetailView({
           }}
         >
           {filtered.map((track) => {
-            const coverSrc =
-              typeof track.cover_path === "string" && track.cover_path.length > 2
-                ? convertFileSrc(track.cover_path)
-                : undefined;
+            const coverSrc = hasCover(track)
+              ? convertFileSrc(track.cover_path!)
+              : undefined;
             return (
               <div
                 key={track.id}
@@ -127,7 +112,7 @@ export function GenreDetailView({
                 <div className="album-artist" title={track.artist}>
                   {track.artist}
                 </div>
-                <div className="time-cell">{fmt(track.duration_secs)}</div>
+                <div className="time-cell">{formatDuration(track.duration_secs)}</div>
               </div>
             );
           })}

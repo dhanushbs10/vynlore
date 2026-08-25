@@ -1,30 +1,32 @@
 import { useState, useMemo } from "react";
-import { Track } from "../../App";
 import { usePlayer } from "../../context/PlayerContext";
 import { convertFileSrc } from "@tauri-apps/api/core";
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
+import { formatDuration, formatSampleRate, hasCover } from "../../utils/format";
+import type { Track } from "../../types";
 
 export function TracksView({ tracks }: { tracks: Track[] }) {
 const [query, setQuery] = useState("");
 const { playTrack, currentTrack } = usePlayer();
 
-const shuffled = useMemo(() => shuffle(tracks), [tracks]);
+const sorted = useMemo(() => {
+return [...tracks].sort((a, b) => {
+const artistCmp = a.artist.localeCompare(b.artist);
+if (artistCmp !== 0) return artistCmp;
+const albumCmp = a.album.localeCompare(b.album);
+if (albumCmp !== 0) return albumCmp;
+const numCmp = (a.track_number ?? 0) - (b.track_number ?? 0);
+if (numCmp !== 0) return numCmp;
+return a.title.localeCompare(b.title);
+});
+}, [tracks]);
 
 const filtered = query.trim()
-? shuffled.filter(t =>
-[t.title, t.artist, t.album].some(field =>
+? sorted.filter(t =>
+[t.title ?? "", t.artist ?? "", t.album ?? ""].some(field =>
 field.toLowerCase().includes(query.toLowerCase())
 )
 )
-: shuffled;
+: sorted;
 
 return (
 <div>
@@ -62,10 +64,7 @@ onChange={e => setQuery(e.target.value)}
 </div>
 {filtered.map((track, idx) => {
 const active = track.id === currentTrack?.id;
-const coverSrc =
-typeof track.cover_path === "string" && track.cover_path.length > 2
-? convertFileSrc(track.cover_path)
-: undefined;
+const coverSrc = hasCover(track) ? convertFileSrc(track.cover_path!) : undefined;
 
       return (
         <TrackRow
@@ -119,16 +118,13 @@ onClick={() => playTrack(track, allTracks)}
 <div className="track-cell track-meta">{track.artist}</div>
 <div className="track-cell track-meta">{track.album}</div>
 <div className="track-cell track-meta">
-<span className="format-badge">FLAC</span>
+<span className="format-badge">{track.format || "FLAC"}</span>
 </div>
 <div className="track-cell track-meta freq-cell">
-{track.sample_rate >= 1000
-? `${(track.sample_rate / 1000).toFixed(1)} kHz`
-: `${track.sample_rate} Hz`}
+{formatSampleRate(track.sample_rate)}
 </div>
 <div className="track-cell track-meta time-cell">
-{Math.floor(track.duration_secs / 60)}:
-{String(Math.floor(track.duration_secs % 60)).padStart(2, "0")}
+{formatDuration(track.duration_secs)}
 </div>
 </div>
 );

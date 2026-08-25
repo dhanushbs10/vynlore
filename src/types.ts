@@ -4,10 +4,15 @@ export interface Track {
   title: string;
   artist: string;
   album: string;
+  genre?: string | null;
   sample_rate: number;
   bit_depth: number;
   channels: number;
   duration_secs: number;
+  track_number: number;
+  cover_path?: string | null;
+  lyrics?: string | null;
+  format: string;
 }
 
 export interface AudioDevice {
@@ -20,3 +25,5 @@ export interface ToastMessage {
   title: string;
   subtitle?: string;
 }
+
+export type RepeatMode = "off" | "all" | "one";

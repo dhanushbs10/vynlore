@@ -1,6 +1,7 @@
 import { useMemo } from "react";
-import { Track } from "../../App";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { hasCover } from "../../utils/format";
+import type { Track } from "../../types";
 
 interface GenresViewProps {
   tracks: Track[];
@@ -9,9 +10,7 @@ interface GenresViewProps {
 
 function pickRandomCover(tracks: Track[]): string | undefined {
   if (tracks.length === 0) return undefined;
-  const withCover = tracks.filter(
-    (t) => typeof t.cover_path === "string" && t.cover_path.length > 2
-  );
+  const withCover = tracks.filter(hasCover);
   if (withCover.length === 0) return undefined;
   const idx = Math.floor(Math.random() * withCover.length);
   return convertFileSrc(withCover[idx].cover_path!);

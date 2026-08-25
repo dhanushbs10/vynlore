@@ -9,14 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@radix-ui/react-slider": "^1.4.3",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
-    "clsx": "^2.1.1",
     "lucide-react": "^1.24.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "tailwind-merge": "^3.6.0"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

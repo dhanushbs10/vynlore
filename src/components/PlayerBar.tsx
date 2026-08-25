@@ -1,14 +1,8 @@
 import { useState, useEffect } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { usePlayer } from "../context/PlayerContext";
-import { Play, Pause, SkipBack, SkipForward, Volume2, ListMusic, Repeat, Repeat1, Heart, ListPlus } from "lucide-react";
-
-function fmt(s: number): string {
-if (s <= 0) return "0:00";
-const m = Math.floor(s / 60);
-const r = Math.floor(s % 60);
-return `${m}:${r.toString().padStart(2, "0")}`;
-}
+import { formatDuration } from "../utils/format";
+import { Play, Pause, SkipBack, SkipForward, Volume2, ListMusic, Repeat, Repeat1, Heart, ListPlus, Zap } from "lucide-react";
 
 export default function PlayerBar({ onExpandCurrentTrack }: { onExpandCurrentTrack?: () => void }) {
 const {
@@ -18,17 +12,21 @@ isPaused,
 currentTime,
 isShuffle,
 repeatMode,
-toggleShuffle,
-toggleRepeat,
+volume,
+exclusiveEnabled,
+exclusiveActive,
+setVolume,
 seekTime,
 togglePlayPause,
+toggleShuffle,
+toggleRepeat,
+toggleExclusive,
 playNext,
 playPrev,
 } = usePlayer();
-const [volume, setVolume] = useState(80);
 const [isLiked, setIsLiked] = useState(false);
 const [showPlaylistDropdown, setShowPlaylistDropdown] = useState(false);
-const [playlists, setPlaylists] = useState<any[]>([]);
+const [playlists, setPlaylists] = useState<{ id: number; name: string }[]>([]);
 
 useEffect(() => {
 if (!currentTrack) return;
@@ -62,8 +60,12 @@ e.stopPropagation();
 const next = !showPlaylistDropdown;
 setShowPlaylistDropdown(next);
 if (next) {
-const pls = await invoke<any[]>("get_playlists");
+try {
+const pls = await invoke<{ id: number; name: string }[]>("get_playlists");
 setPlaylists(pls.filter((p) => p.name !== "Liked Songs"));
+} catch (err) {
+console.error("Failed to load playlists:", err);
+}
 }
 };
 
@@ -79,19 +81,21 @@ const pct = duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
 const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
 if (!currentTrack || duration <= 0) return;
 const rect = e.currentTarget.getBoundingClientRect();
-const ratio = (e.clientX - rect.left) / rect.width;
-const t = ratio * duration;
-seekTime(t);
-invoke("seek_playback", { seekSecs: t }).catch((err) => console.error("Seek failed:", err));
+const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+seekTime(ratio * duration);
 };
 
 const coverSrc = currentTrack?.cover_path ? convertFileSrc(currentTrack.cover_path) : undefined;
 
 const formatLabel = currentTrack
-? `FLAC ${currentTrack.bit_depth}/${currentTrack.sample_rate >= 1000 ? (currentTrack.sample_rate / 1000).toFixed(0) + "kHz" : currentTrack.sample_rate + "Hz"}`
+? [
+    currentTrack.format || "FLAC",
+    currentTrack.bit_depth > 0 ? `${currentTrack.bit_depth}/${(currentTrack.sample_rate / 1000).toFixed(0)}kHz` : `${(currentTrack.sample_rate / 1000).toFixed(0)}kHz`,
+  ].join(" ")
 : "";
 
-const repeatColor = repeatMode === "off" ? "var(--text-tertiary)" : "#d4a373";
+const repeatColor = repeatMode === "off" ? "var(--text-tertiary)" : "var(--accent-warm)";
+const exclusiveColor = exclusiveEnabled ? "var(--accent-warm)" : "var(--text-tertiary)";
 
 return (
 <div className="player-bar-container">
@@ -101,7 +105,7 @@ return (
 </div>
 
 <div className="player-bar-inner">
-<div className="track-info-left" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+<div className="track-info-left">
   {coverSrc ? (
     <div
       onClick={() => onExpandCurrentTrack?.()}
@@ -132,10 +136,10 @@ cursor: "pointer",
 padding: 0,
 display: "inline-flex",
 alignItems: "center",
-color: isLiked ? "#d4a373" : "var(--text-tertiary)",
+color: isLiked ? "var(--accent-warm)" : "var(--text-tertiary)",
 }}
 >
-<Heart size={16} fill={isLiked ? "#d4a373" : "none"} />
+<Heart size={16} fill={isLiked ? "var(--accent-warm)" : "none"} />
 </button>
 <button
 onClick={handleAddToPlaylistClick}
@@ -158,8 +162,8 @@ style={{
 position: "absolute",
 bottom: 60,
 right: 0,
-background: "#141414",
-border: "1px solid #333",
+background: "var(--bg-raised)",
+border: "1px solid var(--border-medium)",
 borderRadius: 6,
 padding: 4,
 minWidth: 160,
@@ -176,12 +180,12 @@ void handleAddToPlaylist(p.id);
 style={{
 padding: "8px 12px",
 cursor: "pointer",
-color: "#e0e0e0",
+color: "var(--text-primary)",
 borderRadius: 4,
 fontSize: 13,
 }}
 onMouseEnter={(e) => {
-(e.target as HTMLDivElement).style.background = "#1e1e1e";
+(e.target as HTMLDivElement).style.background = "var(--bg-hover)";
 }}
 onMouseLeave={(e) => {
 (e.target as HTMLDivElement).style.background = "transparent";
@@ -230,7 +234,7 @@ right: 2,
 fontSize: 7,
 fontWeight: 800,
 lineHeight: 1,
-color: "#d4a373",
+color: "var(--accent-warm)",
 pointerEvents: "none",
 }}
 >
@@ -241,21 +245,51 @@ pointerEvents: "none",
 </div>
 
 <div className="right-controls">
+<button
+  onClick={toggleExclusive}
+  title={
+    exclusiveEnabled
+      ? exclusiveActive
+        ? "Bit-perfect exclusive mode active — click to disable"
+        : "Exclusive mode on, but this track's format isn't supported by the device — playing shared"
+      : "Enable bit-perfect exclusive output"
+  }
+  style={{
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    padding: 2,
+    display: "flex",
+    alignItems: "center",
+    position: "relative",
+  }}
+>
+  <Zap size={13} style={{ color: exclusiveColor }} fill={exclusiveActive ? "var(--accent-warm)" : "none"} />
+  {exclusiveActive && (
+    <span
+      style={{
+        marginLeft: 3,
+        fontSize: 8,
+        fontWeight: 800,
+        letterSpacing: 0.5,
+        color: "var(--accent-warm)",
+      }}
+    >
+      EXCL
+    </span>
+  )}
+</button>
 <span className="format-badge-sm">{formatLabel}</span>
 <span className="time-display">
-{fmt(currentTime)} / {fmt(currentTrack?.duration_secs ?? 0)}
+{formatDuration(currentTime)} / {formatDuration(currentTrack?.duration_secs ?? 0)}
 </span>
 <Volume2 size={13} style={{ color: "var(--text-secondary)" }} />
 <input
 type="range"
 min="0"
 max="100"
-value={volume}
-onChange={(e) => {
-const v = Number(e.target.value);
-setVolume(v);
-invoke("set_volume", { volume: v / 100 });
-}}
+value={Math.round(volume * 100)}
+onChange={(e) => setVolume(Number(e.target.value) / 100)}
 className="volume-slider"
 />
 </div>

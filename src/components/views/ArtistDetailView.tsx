@@ -1,31 +1,17 @@
 import { useMemo, useCallback } from "react";
-import { Track } from "../../App";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ArrowLeft, Play, Shuffle } from "lucide-react";
 import { parseArtists } from "../../utils/artists";
 import { usePlayer } from "../../context/PlayerContext";
+import { formatDuration, hasCover } from "../../utils/format";
+import { fisherYates } from "../../utils/shuffle";
+import type { Track } from "../../types";
 
 interface ArtistDetailViewProps {
   artist: string;
   tracks: Track[];
   onBack: () => void;
   playTrack: (track: Track, queue?: Track[]) => void;
-}
-
-function fmt(s: number): string {
-  if (s <= 0) return "0:00";
-  const m = Math.floor(s / 60);
-  const r = Math.floor(s % 60);
-  return `${m}:${r.toString().padStart(2, "0")}`;
-}
-
-function fisherYates<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
 }
 
 export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDetailViewProps) {
@@ -39,7 +25,12 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
 
   const groupedAlbums = useMemo(() => {
     const map = new Map<string, Track[]>();
-    artistTracks.forEach((track) => {
+    const sorted = [...artistTracks].sort((a, b) => {
+      const albumCmp = a.album.localeCompare(b.album);
+      if (albumCmp !== 0) return albumCmp;
+      return (a.track_number ?? 0) - (b.track_number ?? 0);
+    });
+    sorted.forEach((track) => {
       const album = track.album || "Unknown Album";
       if (!map.has(album)) map.set(album, []);
       map.get(album)!.push(track);
@@ -47,10 +38,9 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
     return Array.from(map.entries()).map(([album, tracks]) => ({ album, tracks }));
   }, [artistTracks]);
 
-  const coverSrc =
-    artistTracks[0]?.cover_path && artistTracks[0].cover_path.length > 2
-      ? convertFileSrc(artistTracks[0].cover_path)
-      : undefined;
+  const coverSrc = hasCover(artistTracks[0])
+    ? convertFileSrc(artistTracks[0].cover_path!)
+    : undefined;
 
   const totalDuration = artistTracks.reduce((acc, t) => acc + t.duration_secs, 0);
   const albumCount = groupedAlbums.length;
@@ -78,7 +68,7 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
         <div>
           <div className="view-title">{artist}</div>
           <div className="view-subtitle">
-            {artistTracks.length} tracks · {albumCount} albums · {fmt(totalDuration)}
+            {artistTracks.length} tracks · {albumCount} albums · {formatDuration(totalDuration)}
           </div>
         </div>
       </div>
@@ -136,10 +126,9 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
 
       <div>
         {groupedAlbums.map(({ album, tracks: albumTracks }) => {
-          const albumCover =
-            albumTracks[0].cover_path && albumTracks[0].cover_path.length > 2
-              ? convertFileSrc(albumTracks[0].cover_path)
-              : undefined;
+          const albumCover = hasCover(albumTracks[0])
+            ? convertFileSrc(albumTracks[0].cover_path!)
+            : undefined;
 
           return (
             <div key={album} style={{ marginBottom: 32 }}>
@@ -189,10 +178,9 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
                 ) : (
                   albumTracks.map((track, idx) => {
                     const active = currentTrack && track.id === currentTrack.id;
-                    const trackCover =
-                      typeof track.cover_path === "string" && track.cover_path.length > 2
-                        ? convertFileSrc(track.cover_path)
-                        : undefined;
+                    const trackCover = hasCover(track)
+                      ? convertFileSrc(track.cover_path!)
+                      : undefined;
                     return (
                       <div
                         key={track.id}
@@ -210,7 +198,7 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
                           {active ? <span className="equalizer" /> : idx + 1}
                         </div>
                         <div className="track-cell track-title">{track.title}</div>
-                        <div className="track-cell time-cell">{fmt(track.duration_secs)}</div>
+                        <div className="track-cell time-cell">{formatDuration(track.duration_secs)}</div>
                       </div>
                     );
                   })

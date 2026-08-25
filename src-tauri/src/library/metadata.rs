@@ -47,6 +47,7 @@ pub struct TrackMetadata {
   pub artist: String,
   pub album: String,
   pub genre: String,
+  pub format: String,
   pub sample_rate: u32,
   pub bit_depth: u32,
   pub channels: u8,
@@ -57,23 +58,32 @@ pub struct TrackMetadata {
   pub lyrics: String,
 }
 
-impl TrackMetadata {
-  pub fn placeholder(file_path: &Path) -> Self {
-    Self {
-      title: file_path.file_stem().unwrap_or_default().to_string_lossy().to_string(),
-      artist: "Unknown Artist".to_string(),
-      album: "Unknown Album".to_string(),
-      genre: String::new(),
-      sample_rate: 0,
-      bit_depth: 0,
-      channels: 0,
-      duration_secs: 0.0,
-      track_number: 0,
-      disc_number: 0,
-      cover_path: String::new(),
-      lyrics: String::new(),
-    }
-  }
+/// Extensions the scanner/watcher accept. Keep in sync with the enabled
+/// Symphonia features (no Opus codec in symphonia 0.5 — .opus demuxes but
+/// cannot decode).
+const SUPPORTED_EXTENSIONS: &[(&str, &str)] = &[
+  ("flac", "FLAC"),
+  ("wav", "WAV"),
+  ("wave", "WAV"),
+  ("aiff", "AIFF"),
+  ("aif", "AIFF"),
+  ("aifc", "AIFF"),
+  ("mp3", "MP3"),
+  ("m4a", "M4A"),
+  ("m4b", "M4A"),
+  ("ogg", "OGG"),
+  ("oga", "OGG"),
+];
+
+pub fn is_supported_extension(ext: &str) -> bool {
+  SUPPORTED_EXTENSIONS.iter().any(|(e, _)| ext.eq_ignore_ascii_case(e))
+}
+
+pub fn format_label_for(ext: &str) -> Option<&'static str> {
+  SUPPORTED_EXTENSIONS
+    .iter()
+    .find(|(e, _)| ext.eq_ignore_ascii_case(e))
+    .map(|(_, label)| *label)
 }
 
 pub fn read_metadata(path: &Path) -> Result<TrackMetadata, Box<dyn std::error::Error>> {
@@ -97,15 +107,29 @@ pub fn read_metadata(path: &Path) -> Result<TrackMetadata, Box<dyn std::error::E
   let bit_depth = props.bit_depth().unwrap_or(0) as u32;
   let channels = props.channels().unwrap_or(0);
 
+  let format = path
+    .extension()
+    .and_then(|e| e.to_str())
+    .and_then(format_label_for)
+    .unwrap_or("UNKNOWN")
+    .to_string();
+
   let mut cover_path = String::new();
 
   if let Some(picture) = tag.pictures().first() {
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    use std::hash::Hasher;
+    hasher.write(picture.data());
+    let hash = hasher.finish();
+    let ext = match picture.mime_type() {
+      lofty::MimeType::Png => "png",
+      _ => "jpg",
+    };
     let cache_dir = dirs::cache_dir()
       .unwrap_or_else(|| Path::new(".").to_path_buf())
       .join("vynlore-art");
     fs::create_dir_all(&cache_dir)?;
-    let out_path = cache_dir.join(format!("{}.jpg", stem));
+    let out_path = cache_dir.join(format!("{:016x}.{}", hash, ext));
 
     if !out_path.exists() {
       let mut file = fs::File::create(&out_path)?;
@@ -119,6 +143,7 @@ pub fn read_metadata(path: &Path) -> Result<TrackMetadata, Box<dyn std::error::E
     artist: get_str(ItemKey::TrackArtist, "Unknown Artist"),
     album: get_str(ItemKey::AlbumTitle, "Unknown Album"),
     genre: get_str(ItemKey::Genre, ""),
+    format,
     sample_rate,
     bit_depth,
     channels,

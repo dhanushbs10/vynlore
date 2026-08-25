@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { Search, SlidersHorizontal } from "lucide-react";
 
 interface Props {
   onAddFolder: () => void;
@@ -6,9 +7,11 @@ interface Props {
   onNavClick: (view: string) => void;
   scanning: boolean;
   hasFolder: boolean;
+  onOpenSearch?: () => void;
+  onToggleEq?: () => void;
 }
 
-export function Sidebar({ onAddFolder, currentView, onNavClick, scanning, hasFolder }: Props) {
+export function Sidebar({ onAddFolder, currentView, onNavClick, scanning, hasFolder, onOpenSearch, onToggleEq }: Props) {
   const mainItems = [
     { label: "Home", view: "now" },
     { label: "Library", view: "browse" },
@@ -25,6 +28,25 @@ export function Sidebar({ onAddFolder, currentView, onNavClick, scanning, hasFol
   return (
     <aside className="app-sidebar">
       <div className="sidebar-logo">VYNLORE</div>
+
+      <button
+        className="sidebar-search-btn"
+        onClick={onOpenSearch}
+        aria-label="Search library"
+      >
+        <Search size={14} />
+        <span>Search</span>
+        <span className="sidebar-search-kbd">Ctrl K</span>
+      </button>
+
+      <button
+        className="sidebar-eq-btn"
+        onClick={onToggleEq}
+        aria-label="Toggle equalizer"
+      >
+        <SlidersHorizontal size={14} />
+        <span>Equalizer</span>
+      </button>
 
       <ul className="sidebar-nav">
         {mainItems.map((item) => (

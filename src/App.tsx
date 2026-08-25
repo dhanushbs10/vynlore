@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -6,6 +6,7 @@ import "./styles/toast.css";
 import { PlayerProvider, usePlayer } from "./context/PlayerContext";
 import { Sidebar } from "./components/Sidebar";
 import { QueuePanel } from "./components/QueuePanel";
+import { EqPanel } from "./components/EqPanel";
 import { TracksView } from "./components/views/TracksView";
 import { AlbumsView } from "./components/views/AlbumsView";
 import { ArtistsView } from "./components/views/ArtistsView";
@@ -18,24 +19,11 @@ import { PlaylistsView } from "./components/views/PlaylistsView";
 import { PlaylistDetailView } from "./components/views/PlaylistDetailView";
 import { HomeView } from "./components/views/HomeView";
 import PlayerBar from "./components/PlayerBar";
+import { SearchPalette } from "./components/SearchPalette";
 import { Toast } from "./components/Toast";
-import type { ToastMessage } from "./types";
+import type { Track, ToastMessage } from "./types";
 
-export interface Track {
-  id: number;
-  file_path: string;
-  title: string;
-  artist: string;
-  album: string;
-  genre?: string;
-  sample_rate: number;
-  bit_depth: number;
-  channels: number;
-  duration_secs: number;
-  cover_path?: string;
-  track_number?: number;
-  lyrics?: string;
-}
+export type { Track };
 
 type View = "now" | "browse" | "albums" | "artists" | "playlists" | "playlist-detail" | "genres" | "genre-detail" | "album-detail" | "artist-detail";
 
@@ -49,9 +37,12 @@ function AppInner() {
   const [selectedPlaylist, setSelectedPlaylist] = useState<number | null>(null);
   const [scanning, setScanning] = useState(false);
   const [showFullNow, setShowFullNow] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showEq, setShowEq] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [tauriReady, setTauriReady] = useState(isTauri());
   const [watchedFolder, setWatchedFolder] = useState<string | null>(null);
+  const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
   const {
     currentTrackIndex,
     currentTrack,
@@ -60,21 +51,60 @@ function AppInner() {
     setLibraryTracks,
     setDisplayedTracks,
     playTrack,
+    togglePlayPause,
+    seekTime,
+    playNext,
+    playPrev,
+    currentTime,
   } = usePlayer();
+
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowSearch((v) => !v);
+        return;
+      }
+      if (typing) return;
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        void togglePlayPause();
+      } else if (e.key === "ArrowRight" && e.ctrlKey) {
+        e.preventDefault();
+        void playNext();
+      } else if (e.key === "ArrowLeft" && e.ctrlKey) {
+        e.preventDefault();
+        void playPrev();
+      } else if (e.key === "ArrowRight") {
+        if (!currentTrack) return;
+        e.preventDefault();
+        seekTime(Math.min(currentTrack.duration_secs, currentTimeRef.current + 5));
+      } else if (e.key === "ArrowLeft") {
+        if (!currentTrack) return;
+        e.preventDefault();
+        seekTime(Math.max(0, currentTimeRef.current - 5));
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [togglePlayPause, playNext, playPrev, seekTime, currentTrack]);
 
   const loadTracks = useCallback(async () => {
     try {
       const t = await invoke<Track[]>("get_tracks");
-      const uniqueTracks = Array.from(
-        new Map(
-          t.map((track) => [
-            `${track.title}|${track.artist}`.toLowerCase(),
-            track,
-          ]),
-        ).values(),
-      );
-      setLibraryTracks(uniqueTracks);
-      setDisplayedTracks(uniqueTracks);
+      setLibraryTracks(t);
+      setDisplayedTracks(t);
     } catch (err) {
       console.error("failed to load library", err);
     }
@@ -82,23 +112,29 @@ function AppInner() {
 
   useEffect(() => {
     if (!tauriReady) return;
-    let cancelled = false;
-    const init = async () => {
-      try {
-        const folder = await invoke<string | null>("get_watched_folder");
-        if (folder && !cancelled) {
-          setWatchedFolder(folder);
-          await invoke("rescan_folder", { path: folder });
-        }
-      } catch (err) {
-        console.error("failed to init watched folder", err);
-      }
-    };
-    init();
-    return () => {
-      cancelled = true;
-    };
-  }, [tauriReady]);
+    loadTracks();
+    if (isTauri()) {
+      invoke<string | null>("get_watched_folder")
+        .then((folder) => {
+          if (folder) setWatchedFolder(folder);
+        })
+        .catch((err) => console.error("failed to read watched folder", err));
+    }
+  }, [tauriReady, loadTracks]);
+
+  const loadRecentlyPlayed = useCallback(async () => {
+    if (!isTauri()) return;
+    try {
+      setRecentlyPlayed(await invoke<Track[]>("get_recently_played", { limit: 12 }));
+    } catch (err) {
+      console.error("failed to load recently played", err);
+    }
+  }, []);
+
+  // Refresh whenever a new track starts playing (its count was just bumped).
+  useEffect(() => {
+    if (tauriReady) void loadRecentlyPlayed();
+  }, [tauriReady, currentTrack?.id, loadRecentlyPlayed]);
 
   useEffect(() => {
     if (!isTauri()) {
@@ -117,8 +153,13 @@ function AppInner() {
       try {
         unlisten = await listen<WatcherPayload>("watcher-event", (event) => {
           const { title, count } = event.payload;
-          const id = Date.now() + Math.random();
-          setToasts((prev) => [...prev, { id, title, subtitle: `${count} new track${count > 1 ? "s" : ""}` }]);
+          if (!/^removed$/i.test(title)) {
+            const id = Date.now() + Math.random();
+            setToasts((prev) => [...prev, { id, title, subtitle: `${count} new track${count > 1 ? "s" : ""}` }]);
+          }
+          if (/complete|failed/i.test(title)) {
+            setScanning(false);
+          }
           if (count > 0) {
             loadTracks();
           }
@@ -133,21 +174,6 @@ function AppInner() {
       if (unlisten) unlisten();
     };
   }, [loadTracks]);
-
-  useEffect(() => {
-    if (!isTauri() || !watchedFolder) return;
-    let interval: number | undefined;
-
-    interval = window.setInterval(() => {
-      invoke("rescan_folder", { path: watchedFolder }).then(() => {
-        loadTracks();
-      }).catch(() => {});
-    }, 300000);
-
-    return () => {
-      if (interval) window.clearInterval(interval);
-    };
-  }, [watchedFolder, loadTracks]);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -232,6 +258,8 @@ function AppInner() {
         onNavClick={handleNav}
         scanning={scanning}
         hasFolder={!!watchedFolder}
+        onOpenSearch={() => setShowSearch(true)}
+        onToggleEq={() => setShowEq((v) => !v)}
       />
       <main className="app-main">
         <div className="main-scroll">
@@ -242,6 +270,7 @@ function AppInner() {
               {currentView === "now" && (
                 <HomeView
                   libraryTracks={libraryTracks}
+                  recentlyPlayed={recentlyPlayed}
                   playTrack={playTrack}
                   onExpandTrack={handleExpandTrack}
                   watchedFolder={watchedFolder}
@@ -298,7 +327,6 @@ function AppInner() {
                   playlistId={selectedPlaylist}
                   playTrack={playTrack}
                   onBack={() => setSelectedPlaylist(null)}
-                  currentTrack={currentTrack}
                 />
               )}
             </>
@@ -310,7 +338,22 @@ function AppInner() {
         currentTrackIndex={currentTrackIndex}
         playTrack={playTrack}
       />
+      <EqPanel open={showEq} onClose={() => setShowEq(false)} />
       <PlayerBar onExpandCurrentTrack={() => setShowFullNow(true)} />
+      {showSearch && (
+        <SearchPalette
+          tracks={libraryTracks}
+          actions={{
+            onClose: () => setShowSearch(false),
+            onPlayTrack: (track, queue) => {
+              void playTrack(track, queue);
+            },
+            onGoToArtist: handleArtistClick,
+            onGoToAlbum: handleAlbumClick,
+            onGoToGenre: handleGenreClick,
+          }}
+        />
+      )}
       <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

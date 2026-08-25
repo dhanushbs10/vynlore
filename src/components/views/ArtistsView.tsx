@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
-import { Track } from "../../App";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { parseArtists } from "../../utils/artists";
-
-const MOCK = ["Vynlore", "Luna Wave", "Glass Hive", "Nocturne", "Analog Soul", "Echo Chamber", "Driftwood"];
+import { hasCover } from "../../utils/format";
+import type { Track } from "../../types";
 
 interface ArtistsViewProps {
 	tracks: Track[];
@@ -12,9 +11,7 @@ interface ArtistsViewProps {
 
 function pickRandomCover(tracks: Track[]): string | undefined {
   if (tracks.length === 0) return undefined;
-  const withCover = tracks.filter(
-    (t) => typeof t.cover_path === "string" && t.cover_path.length > 2
-  );
+  const withCover = tracks.filter(hasCover);
   if (withCover.length === 0) return undefined;
   const idx = Math.floor(Math.random() * withCover.length);
   return convertFileSrc(withCover[idx].cover_path!);
@@ -23,14 +20,11 @@ function pickRandomCover(tracks: Track[]): string | undefined {
 export function ArtistsView({ tracks, onArtistClick }: ArtistsViewProps) {
 	const [query, setQuery] = useState("");
 	const list = useMemo(() => {
-		if (tracks.length) {
-			const set = new Set<string>();
-			tracks.forEach((t) => {
-				parseArtists(t.artist).forEach((a) => set.add(a));
-			});
-			return [...set].sort((a, b) => a.localeCompare(b));
-		}
-		return MOCK;
+		const set = new Set<string>();
+		tracks.forEach((t) => {
+			parseArtists(t.artist).forEach((a) => set.add(a));
+		});
+		return [...set].sort((a, b) => a.localeCompare(b));
 	}, [tracks]);
 
 	const filtered = useMemo(() => {

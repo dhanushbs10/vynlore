@@ -1,8 +1,9 @@
 import { useMemo } from "react";
-import { Track } from "../../App";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ArrowLeft, Play } from "lucide-react";
 import { usePlayer } from "../../context/PlayerContext";
+import { formatDuration, hasCover } from "../../utils/format";
+import type { Track } from "../../types";
 
 interface AlbumDetailViewProps {
 	albumName: string;
@@ -10,13 +11,6 @@ interface AlbumDetailViewProps {
 	displayedTracksSetter: (tracks: Track[]) => void;
 	playTrack: (track: Track, queue?: Track[]) => Promise<void>;
 	onBack: () => void;
-}
-
-function fmt(s: number): string {
-	if (s <= 0) return "0:00";
-	const m = Math.floor(s / 60);
-	const r = Math.floor(s % 60);
-	return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
 export function AlbumDetailView({ albumName, tracks, displayedTracksSetter, playTrack, onBack }: AlbumDetailViewProps) {
@@ -33,7 +27,7 @@ export function AlbumDetailView({ albumName, tracks, displayedTracksSetter, play
 		return filtered;
 	}, [tracks, albumName]);
 
-	const coverSrc = albumTracks[0]?.cover_path && albumTracks[0].cover_path!.length > 2
+	const coverSrc = hasCover(albumTracks[0])
 		? convertFileSrc(albumTracks[0].cover_path!)
 		: undefined;
 
@@ -55,7 +49,7 @@ export function AlbumDetailView({ albumName, tracks, displayedTracksSetter, play
 				</button>
 				<div>
 					<div className="view-title">{albumName}</div>
-					<div className="view-subtitle">{artist} · {albumTracks.length} tracks · {fmt(totalDuration)}</div>
+					<div className="view-subtitle">{artist} · {albumTracks.length} tracks · {formatDuration(totalDuration)}</div>
 				</div>
 			</div>
 
@@ -108,9 +102,7 @@ export function AlbumDetailView({ albumName, tracks, displayedTracksSetter, play
 				) : (
 					albumTracks.map((track, idx) => {
 						const active = track.id === currentTrack?.id;
-						const coverSrc = typeof track.cover_path === "string" && track.cover_path.length > 2
-							? convertFileSrc(track.cover_path)
-							: undefined;
+						const rowCover = hasCover(track) ? convertFileSrc(track.cover_path!) : undefined;
 						return (
 							<div
 								key={track.id}
@@ -121,15 +113,15 @@ export function AlbumDetailView({ albumName, tracks, displayedTracksSetter, play
 								}}
 							>
 								<div className="track-cell" style={{ width: 48 }}>
-									{coverSrc ? (
-										<img className="track-thumb" src={coverSrc} alt="" />
+									{rowCover ? (
+										<img className="track-thumb" src={rowCover} alt="" />
 									) : (
 										<div className="track-thumb-empty" />
 									)}
 								</div>
 								<div className="track-cell track-num">{active ? <span className="equalizer" /> : idx + 1}</div>
 								<div className="track-cell track-title">{track.title}</div>
-								<div className="track-cell time-cell">{fmt(track.duration_secs)}</div>
+								<div className="track-cell time-cell">{formatDuration(track.duration_secs)}</div>
 							</div>
 						);
 					})

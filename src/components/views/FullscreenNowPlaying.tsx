@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { usePlayer } from "../../context/PlayerContext";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { SkipBack, SkipForward } from "lucide-react";
+import { formatDuration, hasCover } from "../../utils/format";
 
 interface LyricsLine {
   time: number;
@@ -10,17 +11,17 @@ interface LyricsLine {
 
 function parseLyrics(lyricsText: string): LyricsLine[] {
   if (!lyricsText.trim()) return [];
-  
+
   const lines: LyricsLine[] = [];
   const regex = /\[(\d{2}):(\d{2})\.?(\d{2,3})?\](.*)/g;
   let match;
-  
+
   while ((match = regex.exec(lyricsText)) !== null) {
     const minutes = parseInt(match[1], 10);
     const seconds = parseInt(match[2], 10);
-    const milliseconds = match[3] ? parseInt(match[3].padEnd(3, '0'), 10) : 0;
+    const milliseconds = match[3] ? parseInt(match[3].padEnd(3, "0"), 10) : 0;
     const text = match[4].trim();
-    
+
     if (text) {
       lines.push({
         time: minutes * 60 + seconds + milliseconds / 1000,
@@ -28,7 +29,7 @@ function parseLyrics(lyricsText: string): LyricsLine[] {
       });
     }
   }
-  
+
   return lines.sort((a, b) => a.time - b.time);
 }
 
@@ -46,14 +47,14 @@ export function FullscreenNowPlaying({ onClose }: { onClose: () => void }) {
   const elapsed = currentTime;
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const lineRef = useRef<HTMLDivElement>(null);
-  
-  const lyricsText = currentTrack?.lyrics || "";
-  const parsedLyrics = useRef<LyricsLine[]>(parseLyrics(lyricsText));
-  const lyrics = parsedLyrics.current;
-  
-  const activeIdx = lyrics.length > 0
-    ? lyrics.filter((l) => l.time <= elapsed).length - 1
-    : -1;
+
+  const lyrics = useMemo(
+    () => parseLyrics(currentTrack?.lyrics || ""),
+    [currentTrack?.lyrics]
+  );
+
+  const activeIdx =
+    lyrics.length > 0 ? lyrics.filter((l) => l.time <= elapsed).length - 1 : -1;
 
   useEffect(() => {
     if (!lyricsOpen || !lineRef.current) return;
@@ -78,9 +79,15 @@ export function FullscreenNowPlaying({ onClose }: { onClose: () => void }) {
   const pct = currentTrack.duration_secs
     ? Math.min((elapsed / currentTrack.duration_secs) * 100, 100)
     : 0;
-  const coverSrc = currentTrack.cover_path
-    ? convertFileSrc(currentTrack.cover_path)
+  const coverSrc = hasCover(currentTrack)
+    ? convertFileSrc(currentTrack.cover_path!)
     : undefined;
+
+  const handleSeekbarClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    seekTime(ratio * currentTrack.duration_secs);
+  };
 
   return (
     <div className="fnow">
@@ -130,16 +137,11 @@ export function FullscreenNowPlaying({ onClose }: { onClose: () => void }) {
           )
         ) : (
           <div className="fnow-seek">
-            <span className="fnow-time">
-              {Math.floor(elapsed / 60)}:{String(Math.floor(elapsed % 60)).padStart(2, "0")}
-            </span>
-            <div className="fnow-track">
+            <span className="fnow-time">{formatDuration(elapsed)}</span>
+            <div className="fnow-track" onClick={handleSeekbarClick}>
               <div className="fnow-fill" style={{ width: `${pct}%` }} />
             </div>
-            <span className="fnow-time">
-              {Math.floor(currentTrack.duration_secs / 60)}:
-              {String(Math.floor(currentTrack.duration_secs % 60)).padStart(2, "0")}
-            </span>
+            <span className="fnow-time">{formatDuration(currentTrack.duration_secs)}</span>
           </div>
         )}
       </div>

@@ -1,11 +1,15 @@
-use notify::{RecommendedWatcher, RecursiveMode, Watcher, Config, EventKind};
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::Emitter;
 
 use crate::library::db::LibraryDb;
 use crate::library::metadata;
+
+const DEBOUNCE: Duration = Duration::from_millis(800);
+const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, serde::Serialize)]
 pub struct WatcherEvent {
@@ -14,128 +18,183 @@ pub struct WatcherEvent {
 	pub count: usize,
 }
 
-pub fn start_watcher(app: tauri::AppHandle, db: Arc<Mutex<LibraryDb>>, folder_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-	let folder_path_buf = folder_path.to_path_buf();
-	let folder_path_for_watch = folder_path.to_path_buf();
+fn watcher_slot() -> &'static Mutex<Option<(RecommendedWatcher, Arc<std::sync::atomic::AtomicBool>)>> {
+	static SLOT: OnceLock<
+		Mutex<Option<(RecommendedWatcher, Arc<std::sync::atomic::AtomicBool>)>>,
+	> = OnceLock::new();
+	SLOT.get_or_init(|| Mutex::new(None))
+}
 
-	let last_added = Arc::new(Mutex::new(None::<(String, Instant)>));
-	let batch = Arc::new(Mutex::new(Vec::new()));
+pub fn start_watcher(
+	app: tauri::AppHandle,
+	db: Arc<Mutex<LibraryDb>>,
+	folder_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+	let mut slot = watcher_slot().lock().unwrap();
+	if let Some((_, stop_flag)) = slot.take() {
+		stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+	}
 
-	std::thread::spawn(move || {
-		// Clone handles for the watcher closure so the loop below keeps the originals
-		let closure_batch = Arc::clone(&batch);
-		let closure_last = Arc::clone(&last_added);
-		let closure_db = Arc::clone(&db);
-		let closure_path_buf = folder_path_buf.clone();
-		let closure_path_for_watch = folder_path_for_watch.clone();
+	let pending: Arc<Mutex<HashMap<PathBuf, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
+	let removals: Arc<Mutex<HashMap<PathBuf, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
+	let root = folder_path.to_path_buf();
 
-		let mut watcher = match RecommendedWatcher::new(
-			move |res: Result<notify::Event, notify::Error>| {
-				if let Ok(event) = res {
-					let is_create_or_modify = matches!(
-						event.kind,
-						EventKind::Create(_) | EventKind::Modify(_)
-					);
+	let cb_pending = pending.clone();
+	let cb_removals = removals.clone();
+	let mut watcher: RecommendedWatcher = RecommendedWatcher::new(
+		move |res: Result<notify::Event, notify::Error>| {
+			if let Ok(event) = res {
+				if !matches!(
+					event.kind,
+					EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+				) {
+					return;
+				}
+				let is_removal = matches!(event.kind, EventKind::Remove(_));
+				let now = Instant::now();
+				let mut map = cb_pending.lock().unwrap();
+				for path in event.paths {
+					let supported = path
+						.extension()
+						.and_then(|e| e.to_str())
+						.map_or(false, |e| metadata::is_supported_extension(e));
+					if !supported {
+						continue;
+					}
+					if is_removal {
+						// A vanished file cancels any queued add for it.
+						map.remove(&path);
+						cb_removals.lock().unwrap().insert(path, now);
+					} else if path.is_file() {
+						// It's back (or still there) — drop queued removals.
+						cb_removals.lock().unwrap().remove(&path);
+						map.insert(path, now);
+					}
+				}
+			}
+		},
+		Config::default(),
+	)?;
 
-					if is_create_or_modify {
-						for path in event.paths {
-							if path.extension().and_then(|e| e.to_str()) != Some("flac") {
-								continue;
-							}
+	watcher.watch(folder_path, RecursiveMode::Recursive)?;
+	println!("Watching folder: {:?}", folder_path);
 
-							let file_path_str = path.to_string_lossy().to_string();
+	let worker_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+	*slot = Some((watcher, worker_stop.clone()));
+	drop(slot);
 
-							let should_process = {
-								let mut last = closure_last.lock().unwrap();
-								match *last {
-									Some((ref last_path, ref time)) => {
-										if last_path == &file_path_str && time.elapsed() < Duration::from_secs(2) {
-											false
-										} else {
-											*last = Some((file_path_str.clone(), Instant::now()));
-											true
-										}
-									}
-									None => {
-										*last = Some((file_path_str.clone(), Instant::now()));
-										true
-									}
+	let app_for_worker = app;
+	std::thread::Builder::new()
+		.name("vynlore-watch".into())
+		.spawn(move || {
+			loop {
+				if worker_stop.load(std::sync::atomic::Ordering::SeqCst) {
+					break;
+				}
+				std::thread::sleep(POLL_INTERVAL);
+
+				let due: Vec<PathBuf> = {
+					let mut map = pending.lock().unwrap();
+					let cutoff = Instant::now() - DEBOUNCE;
+					let expired: Vec<PathBuf> = map
+						.iter()
+						.filter(|(_, seen)| **seen < cutoff)
+						.map(|(p, _)| p.clone())
+						.collect();
+					for p in &expired {
+						map.remove(p);
+					}
+					expired
+				};
+
+				let due_removed: Vec<PathBuf> = {
+					let mut map = removals.lock().unwrap();
+					let cutoff = Instant::now() - DEBOUNCE;
+					let expired: Vec<PathBuf> = map
+						.iter()
+						.filter(|(_, seen)| **seen < cutoff)
+						.map(|(p, _)| p.clone())
+						.collect();
+					for p in &expired {
+						map.remove(p);
+					}
+					expired
+				};
+
+				if due.is_empty() && due_removed.is_empty() {
+					continue;
+				}
+
+				let mut added: Vec<(String, String)> = Vec::new();
+				let mut removed_count = 0usize;
+				if let Ok(db) = db.lock() {
+					for path in due_removed {
+						match db.remove_track_by_path(&path.to_string_lossy()) {
+							Ok(n) => removed_count += n,
+							Err(e) => eprintln!("DB remove failed for {:?}: {}", path, e),
+						}
+					}
+					for path in due {
+						match metadata::read_metadata(&path) {
+							Ok(mut meta) => {
+								if meta.genre.is_empty() {
+									meta.genre =
+										metadata::infer_genre_from_path(&path, &root).to_string();
 								}
-							};
-
-							if !should_process { continue; }
-
-							std::thread::sleep(Duration::from_millis(500));
-
-							match metadata::read_metadata(&path) {
-								Ok(mut meta) => {
-									let folder_str = closure_path_buf.to_string_lossy().to_string();
-
-                  if meta.genre.is_empty() {
-                    meta.genre = metadata::infer_genre_from_path(&path, &closure_path_buf).to_string();
-                  }
-
-									if let Ok(db) = closure_db.lock() {
-										if let Err(e) = db.upsert_track(
-											&file_path_str,
-											&meta.title,
-											&meta.artist,
-											&meta.album,
-											&meta.genre,
-											meta.sample_rate,
-											meta.bit_depth,
-											meta.channels,
-											meta.duration_secs,
-											meta.track_number,
-											meta.disc_number,
-											&folder_str,
-											&meta.cover_path,
-											&meta.lyrics,
-										) {
-											eprintln!("DB update failed: {}", e);
-										} else {
-											let mut b = closure_batch.lock().unwrap();
-											b.push((meta.title.clone(), meta.artist.clone()));
-										}
-									}
+								let folder_str = root.to_string_lossy().to_string();
+								if let Err(e) = db.upsert_track(
+									&path.to_string_lossy(),
+									&meta.title,
+									&meta.artist,
+									&meta.album,
+									&meta.genre,
+									meta.sample_rate,
+									meta.bit_depth,
+									meta.channels,
+									meta.duration_secs,
+								meta.track_number,
+								meta.disc_number,
+								&folder_str,
+								&meta.cover_path,
+								&meta.lyrics,
+								&meta.format,
+							) {
+									eprintln!("DB update failed for {:?}: {}", path, e);
+								} else {
+									added.push((meta.title, meta.artist));
 								}
-								Err(_) => {}
 							}
+							Err(_) => {}
 						}
 					}
 				}
-			},
-			Config::default(),
-		) {
-			Ok(w) => w,
-			Err(e) => {
-				eprintln!("Error creating file watcher: {}", e);
-				return;
+
+				if !added.is_empty() {
+					let count = added.len();
+					let titles: Vec<String> = added.into_iter().map(|(t, _)| t).collect();
+					let _ = app_for_worker.emit(
+						"watcher-event",
+						WatcherEvent {
+							title: titles.join(", "),
+							artist: root.to_string_lossy().to_string(),
+							count,
+						},
+					);
+				}
+
+				if removed_count > 0 {
+					// Frontend treats "removed" specially: refresh, no toast.
+					let _ = app_for_worker.emit(
+						"watcher-event",
+						WatcherEvent {
+							title: "removed".to_string(),
+							artist: root.to_string_lossy().to_string(),
+							count: removed_count,
+						},
+					);
+				}
 			}
-		};
-
-		if let Err(e) = watcher.watch(&folder_path_for_watch, RecursiveMode::Recursive) {
-			eprintln!("Error watching directory: {}", e);
-			return;
-		}
-
-		println!("Watching folder: {:?}", folder_path_for_watch);
-
-		loop {
-			std::thread::sleep(Duration::from_secs(3));
-			let mut b = batch.lock().unwrap();
-			if !b.is_empty() {
-				let count = b.len();
-				let titles: Vec<String> = b.iter().map(|(t, _)| t.clone()).collect();
-				let _ = app.emit("watcher-event", WatcherEvent {
-					title: titles.join(", "),
-					artist: b[0].1.clone(),
-					count,
-				});
-				b.clear();
-			}
-		}
-	});
+		})?;
 
 	Ok(())
 }

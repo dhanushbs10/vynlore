@@ -1,22 +1,17 @@
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-use std::path::PathBuf;
-use cpal::traits::{HostTrait, DeviceTrait};
 use std::fs;
-use std::path::Path;
-
-use tauri::State;
-use tauri::Manager;
-use tauri::Emitter;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::thread;
 
-use crate::state::AppState;
-use crate::audio::config::AudioConfig;
-use crate::audio::resampler::AudioResampler;
-use crate::audio::output::{self, AudioOutput};
-use crate::decoder::flac;
-use crate::library::watcher::{start_watcher as spawn_watcher, WatcherEvent};
+use cpal::traits::{DeviceTrait, HostTrait};
+
+use tauri::{Emitter, Manager, State};
+
+use crate::audio::player;
 use crate::library::scanner::scan_folder_with_progress as scan_folder_internal;
+use crate::library::watcher::{start_watcher as spawn_watcher, WatcherEvent};
+use crate::state::AppState;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UiTrack {
@@ -30,8 +25,10 @@ pub struct UiTrack {
   pub bit_depth: u32,
   pub channels: u8,
   pub duration_secs: f64,
+  pub track_number: i64,
   pub cover_path: Option<String>,
   pub lyrics: Option<String>,
+  pub format: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -83,25 +80,20 @@ pub fn get_watched_folder(app: tauri::AppHandle) -> Result<Option<String>, Strin
 
 #[tauri::command]
 pub fn set_watched_folder(path: String, app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
-  let config = AppConfig {
-    watched_folder: Some(path.clone()),
-  };
-  write_config(&app, &config)?;
+  write_config(&app, &AppConfig { watched_folder: Some(path.clone()) })?;
 
-  let db_for_watcher = state.db.clone();
-  let _ = spawn_watcher(app.clone(), db_for_watcher, Path::new(&path));
+  spawn_watcher(app.clone(), state.db.clone(), Path::new(&path)).map_err(|e| e.to_string())?;
 
-  let db_for_scan = state.db.clone();
-  let path_for_scan = path.clone();
+  let db = state.db.clone();
   let app_for_emit = app.clone();
   thread::spawn(move || {
-    let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-      if let Ok(db) = db_for_scan.lock() {
-        scan_folder_internal(&db, Path::new(&path_for_scan), |count| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+      if let Ok(db) = db.lock() {
+        scan_folder_internal(&db, Path::new(&path), |count| {
           if count % 50 == 0 {
             let _ = app_for_emit.emit("watcher-event", WatcherEvent {
               title: "Scanning...".to_string(),
-              artist: path_for_scan.clone(),
+              artist: path.clone(),
               count,
             });
           }
@@ -111,28 +103,23 @@ pub fn set_watched_folder(path: String, app: tauri::AppHandle, state: State<AppS
       }
     }));
 
-    match scan_result {
+    match result {
       Ok(Ok(count)) => {
         let _ = app_for_emit.emit("watcher-event", WatcherEvent {
           title: "Scan complete".to_string(),
-          artist: path_for_scan.clone(),
+          artist: path,
           count,
         });
       }
       Ok(Err(e)) => {
         let _ = app_for_emit.emit("watcher-event", WatcherEvent {
           title: "Scan failed".to_string(),
-          artist: path_for_scan.clone(),
+          artist: String::new(),
           count: 0,
         });
         eprintln!("Background scan error: {}", e);
       }
       Err(e) => {
-        let _ = app_for_emit.emit("watcher-event", WatcherEvent {
-          title: "Scan panic".to_string(),
-          artist: path_for_scan.clone(),
-          count: 0,
-        });
         eprintln!("Background scan panic: {:?}", e);
       }
     }
@@ -144,46 +131,27 @@ pub fn set_watched_folder(path: String, app: tauri::AppHandle, state: State<AppS
 #[tauri::command]
 pub fn rescan_folder(path: String, app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
   let db = state.db.clone();
-  let path_for_scan = path.clone();
   thread::spawn(move || {
-    let scan_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
       if let Ok(db) = db.lock() {
-        scan_folder_internal(&db, Path::new(&path_for_scan), |count| {
-          if count % 50 == 0 {
-            let _ = app.emit("watcher-event", WatcherEvent {
-              title: "Rescanning...".to_string(),
-              artist: path_for_scan.clone(),
-              count,
-            });
-          }
-        })
+        scan_folder_internal(&db, Path::new(&path), |_| {})
       } else {
         Err("Failed to lock DB for scan".into())
       }
     }));
 
-    match scan_result {
+    match result {
       Ok(Ok(count)) => {
         let _ = app.emit("watcher-event", WatcherEvent {
           title: "Rescan complete".to_string(),
-          artist: path_for_scan.clone(),
+          artist: String::new(),
           count,
         });
       }
       Ok(Err(e)) => {
-        let _ = app.emit("watcher-event", WatcherEvent {
-          title: "Rescan failed".to_string(),
-          artist: path_for_scan.clone(),
-          count: 0,
-        });
         eprintln!("Background rescan error: {}", e);
       }
       Err(e) => {
-        let _ = app.emit("watcher-event", WatcherEvent {
-          title: "Rescan panic".to_string(),
-          artist: path_for_scan.clone(),
-          count: 0,
-        });
         eprintln!("Background rescan panic: {:?}", e);
       }
     }
@@ -194,7 +162,7 @@ pub fn rescan_folder(path: String, app: tauri::AppHandle, state: State<AppState>
 #[tauri::command]
 pub fn get_tracks(state: State<AppState>) -> Result<Vec<UiTrack>, String> {
   let db = state.db.lock().map_err(|e| e.to_string())?;
-  let mut stmt = db.conn.prepare("SELECT id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, COALESCE(cover_path,''), COALESCE(lyrics,'') FROM tracks ORDER BY id DESC").map_err(|e| e.to_string())?;
+  let mut stmt = db.conn.prepare("SELECT id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, COALESCE(track_number,0), COALESCE(cover_path,''), COALESCE(lyrics,''), COALESCE(NULLIF(format,''),'FLAC') FROM tracks ORDER BY id DESC").map_err(|e| e.to_string())?;
   let track_iter = stmt.query_map([], |row| {
     Ok(UiTrack {
       id: row.get(0)?,
@@ -207,8 +175,10 @@ pub fn get_tracks(state: State<AppState>) -> Result<Vec<UiTrack>, String> {
       bit_depth: row.get(7)?,
       channels: row.get(8)?,
       duration_secs: row.get(9)?,
-      cover_path: if row.get::<_, String>(10)?.is_empty() { None } else { Some(row.get(10)?) },
-      lyrics: if row.get::<_, String>(11)?.is_empty() { None } else { Some(row.get(11)?) },
+      track_number: row.get(10)?,
+      cover_path: if row.get::<_, String>(11)?.is_empty() { None } else { Some(row.get(11)?) },
+      lyrics: if row.get::<_, String>(12)?.is_empty() { None } else { Some(row.get(12)?) },
+      format: row.get(13)?,
     })
   }).map_err(|e| e.to_string())?;
 
@@ -245,116 +215,140 @@ pub fn start_watcher(path: String, app: tauri::AppHandle, state: State<AppState>
 
 #[tauri::command]
 pub fn set_volume(volume: f64, state: State<AppState>) -> Result<(), String> {
-  let mut vol = state.volume.lock().map_err(|e| e.to_string())?;
-  *vol = volume as f32;
+  let clamped = volume.clamp(0.0, 1.0) as f32;
+  state.volume.store(clamped.to_bits(), Ordering::Relaxed);
   Ok(())
 }
 
 #[tauri::command]
 pub fn pause_playback(state: State<AppState>) -> Result<(), String> {
-  let output = state.output.lock().map_err(|e| e.to_string())?;
-  if let Some(out) = output.as_ref() {
-    out.pause();
+  if let Some(control) = state.active_control() {
+    control.paused.store(true, Ordering::Relaxed);
   }
   Ok(())
 }
 
 #[tauri::command]
 pub fn resume_playback(state: State<AppState>) -> Result<(), String> {
-  let output = state.output.lock().map_err(|e| e.to_string())?;
-  if let Some(out) = output.as_ref() {
-    out.resume();
+  if let Some(control) = state.active_control() {
+    control.paused.store(false, Ordering::Relaxed);
   }
   Ok(())
 }
 
 #[tauri::command]
-pub fn play_track(file_path: String, _device_index: Option<usize>, state: State<AppState>) -> Result<(), String> {
+pub fn play_track(
+  file_path: String,
+  device_index: Option<usize>,
+  exclusive: Option<bool>,
+  app: tauri::AppHandle,
+  state: State<AppState>,
+) -> Result<bool, String> {
   let path = PathBuf::from(&file_path);
   if !path.exists() {
     return Err("File not found".to_string());
   }
 
-  let (decoder, format) = flac::open_flac(&path).map_err(|e| e.to_string())?;
+  let old_handle = state.playback.lock().map_err(|e| e.to_string())?.take();
+  drop(old_handle);
 
-  let host = cpal::default_host();
-  let device = host.default_output_device().ok_or_else(|| "No default output device found".to_string())?;
-  let device_config = output::find_best_config(&device, format.channels).map_err(|e| e.to_string())?;
-  let device_sample_rate = device_config.sample_rate().0;
-  let device_channels = device_config.channels();
+  let (handle, exclusive_active) = player::start(
+    &path,
+    device_index,
+    exclusive.unwrap_or(false),
+    state.volume.clone(),
+    state.eq.clone(),
+    app,
+    0.0,
+  )?;
 
-  let output_config = AudioConfig {
-    sample_rate: device_sample_rate,
-    channels: device_channels,
-    bits_per_sample: 32,
-    exclusive_mode: true,
-  };
-
-  let decoder_arc = Arc::new(Mutex::new(decoder));
-  let decoder_clone = decoder_arc.clone();
-
-  let needs_resample = device_sample_rate != format.sample_rate;
-  let resampler = if needs_resample {
-    Some(Arc::new(Mutex::new(
-      AudioResampler::new(format.sample_rate, device_sample_rate, format.channels as usize).map_err(|e| e.to_string())?,
-    )))
-  } else { None };
-  let resampler_clone = resampler.clone();
-  let volume_clone = state.volume.clone();
-  let path_for_error = path.clone();
-
-  let audio_output = AudioOutput::start(&output_config, Some(&device), move |output_buffer| {
-    if let Some(ref resampler_arc) = resampler_clone {
-      let mut dec = decoder_clone.lock().unwrap();
-      let mut resampler = resampler_arc.lock().unwrap();
-      while !resampler.has_enough_for_samples(output_buffer.len()) {
-        match flac::decode_packet(&mut *dec) {
-          Some(samples) => resampler.add_input(&samples),
-          None => {
-            resampler.flush();
-            break;
-          }
-        }
-      }
-      let written = resampler.get_output(output_buffer);
-      if written < output_buffer.len() {
-        output_buffer[written..].fill(0.0);
-      }
-    } else {
-      let mut dec = decoder_clone.lock().unwrap();
-      flac::fill_buffer(&mut *dec, output_buffer);
-    }
-    let vol = *volume_clone.lock().unwrap();
-    for sample in output_buffer.iter_mut() { *sample *= vol; }
-  }).map_err(|e| e.to_string())?;
-
-  *state.output.lock().map_err(|e| e.to_string())? = Some(audio_output);
-  *state.decoder.lock().map_err(|e| e.to_string())? = Some(decoder_arc);
-  *state.resampler.lock().map_err(|e| e.to_string())? = resampler;
+  *state.playback.lock().map_err(|e| e.to_string())? = Some(handle);
   *state.current_path.lock().map_err(|e| e.to_string())? = Some(path);
-  Ok(())
+  Ok(exclusive_active)
 }
 
 #[tauri::command]
 pub fn stop_playback(state: State<AppState>) -> Result<(), String> {
-  *state.output.lock().map_err(|e| e.to_string())? = None;
-  *state.decoder.lock().map_err(|e| e.to_string())? = None;
-  *state.resampler.lock().map_err(|e| e.to_string())? = None;
+  if let Some(handle) = state.playback.lock().map_err(|e| e.to_string())?.take() {
+    handle.request_stop();
+  }
   *state.current_path.lock().map_err(|e| e.to_string())? = None;
   Ok(())
 }
 
 #[tauri::command]
 pub fn seek_playback(seek_secs: f64, state: State<AppState>) -> Result<(), String> {
-  if let Some(decoder_arc) = state.decoder.lock().map_err(|e| e.to_string())?.as_ref() {
-    let mut dec = decoder_arc.lock().map_err(|e| e.to_string())?;
-    crate::decoder::flac::seek(&mut *dec, seek_secs).map_err(|e| e.to_string())?;
-  }
-  if let Some(resampler_arc) = state.resampler.lock().map_err(|e| e.to_string())?.as_ref() {
-    let mut res = resampler_arc.lock().map_err(|e| e.to_string())?;
-    res.clear();
+  let guard = state.playback.lock().map_err(|e| e.to_string())?;
+  if let Some(handle) = guard.as_ref() {
+    handle.request_seek(seek_secs.max(0.0));
   }
   Ok(())
+}
+
+#[tauri::command]
+pub fn get_position(state: State<AppState>) -> Result<f64, String> {
+  Ok(state
+    .active_control()
+    .map_or(0.0, |control| control.position_secs()))
+}
+
+#[tauri::command]
+pub fn update_eq(enabled: bool, gains: Vec<f32>, state: State<AppState>) -> Result<(), String> {
+  if gains.len() != crate::audio::eq::EQ_BAND_COUNT {
+    return Err(format!(
+      "expected {} EQ band gains, got {}",
+      crate::audio::eq::EQ_BAND_COUNT,
+      gains.len()
+    ));
+  }
+  let mut eq = state.eq.lock().map_err(|e| e.to_string())?;
+  eq.enabled = enabled;
+  for (out, g) in eq.gains.iter_mut().zip(gains.iter()) {
+    *out = g.clamp(-crate::audio::eq::EQ_MAX_GAIN_DB, crate::audio::eq::EQ_MAX_GAIN_DB);
+  }
+  Ok(())
+}
+
+#[tauri::command]
+pub fn queue_next_track(next_path: Option<String>, state: State<AppState>) -> Result<(), String> {
+  let guard = state.playback.lock().map_err(|e| e.to_string())?;
+  if let Some(handle) = guard.as_ref() {
+    handle.set_next(next_path.map(PathBuf::from));
+  }
+  Ok(())
+}
+
+#[tauri::command]
+pub fn increment_play_count(file_path: String, state: State<AppState>) -> Result<(), String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  db.increment_play_count(&file_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_recently_played(limit: Option<u32>, state: State<AppState>) -> Result<Vec<UiTrack>, String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  let rows = db
+    .recently_played(limit.unwrap_or(20))
+    .map_err(|e| e.to_string())?;
+  Ok(rows
+    .into_iter()
+    .map(|(id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, track_number, cover_path, lyrics, format)| UiTrack {
+      id,
+      file_path,
+      title,
+      artist,
+      album,
+      genre,
+      sample_rate,
+      bit_depth,
+      channels,
+      duration_secs,
+      track_number,
+      cover_path,
+      lyrics,
+      format,
+    })
+    .collect())
 }
 
 #[tauri::command]
@@ -374,33 +368,46 @@ pub fn get_playlists(state: State<AppState>) -> Result<Vec<UiPlaylist>, String> 
 }
 
 #[tauri::command]
+pub fn get_playlist_name(playlist_id: i64, state: State<AppState>) -> Result<Option<String>, String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  db.get_playlist_name(playlist_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn add_track_to_playlist(playlist_id: i64, track_id: i64, state: State<AppState>) -> Result<(), String> {
   let db = state.db.lock().map_err(|e| e.to_string())?;
   db.add_track_to_playlist(playlist_id, track_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+pub fn remove_track_from_playlist(playlist_id: i64, track_id: i64, state: State<AppState>) -> Result<(), String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  db.remove_track_from_playlist(playlist_id, track_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn get_playlist_tracks(state: State<AppState>, playlist_id: i64) -> Result<Vec<UiTrack>, String> {
   let db = state.db.lock().map_err(|e| e.to_string())?;
   let rows = db.get_playlist_tracks(playlist_id).map_err(|e| e.to_string())?;
-  let mut tracks = Vec::with_capacity(rows.len());
-  for (file_path, title, artist, sample_rate, duration_secs, cover_path) in rows {
-    tracks.push(UiTrack {
-      id: 0,
+  Ok(rows
+    .into_iter()
+    .map(|(id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, track_number, cover_path, lyrics, format)| UiTrack {
+      id,
       file_path,
       title,
       artist,
-      album: String::new(),
-      genre: None,
+      album,
+      genre,
       sample_rate,
-      bit_depth: 0,
-      channels: 0,
+      bit_depth,
+      channels,
       duration_secs,
+      track_number,
       cover_path,
-      lyrics: None,
-    });
-  }
-  Ok(tracks)
+      lyrics,
+      format,
+    })
+    .collect())
 }
 
 #[tauri::command]
