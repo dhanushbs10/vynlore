@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Search, SlidersHorizontal } from "lucide-react";
+import { Search, SlidersHorizontal, Home, Library, Disc3, Users, Mic2, ListMusic } from "lucide-react";
 
 interface Props {
   onAddFolder: () => void;
@@ -13,12 +13,12 @@ interface Props {
 
 export function Sidebar({ onAddFolder, currentView, onNavClick, scanning, hasFolder, onOpenSearch, onToggleEq }: Props) {
   const mainItems = [
-    { label: "Home", view: "now" },
-    { label: "Library", view: "browse" },
-    { label: "Albums", view: "albums" },
-    { label: "Artists", view: "artists" },
-    { label: "Genres", view: "genres" },
-    { label: "Playlists", view: "playlists" },
+    { label: "Home", view: "now", icon: Home },
+    { label: "Library", view: "browse", icon: Library },
+    { label: "Albums", view: "albums", icon: Disc3 },
+    { label: "Artists", view: "artists", icon: Users },
+    { label: "Genres", view: "genres", icon: Mic2 },
+    { label: "Playlists", view: "playlists", icon: ListMusic },
   ];
 
   const handleClick = useCallback((view: string) => {
@@ -55,6 +55,7 @@ export function Sidebar({ onAddFolder, currentView, onNavClick, scanning, hasFol
             className={`sidebar-item ${currentView === item.view ? "active" : ""}`}
             onClick={() => handleClick(item.view)}
           >
+            <item.icon size={16} strokeWidth={1.9} />
             {item.label}
           </li>
         ))}
