@@ -69,6 +69,8 @@ pub fn open_audio(path: &std::path::Path) -> Result<(AudioFileDecoder, AudioForm
 }
 
 pub fn decode_packet(decoder: &mut AudioFileDecoder) -> Option<Vec<f32>> {
+	const MAX_SKIP_ITERATIONS: usize = 10000;
+	let mut skipped = 0usize;
 	loop {
 		let packet = match decoder.format.next_packet() {
 			Ok(p) => p,
@@ -76,6 +78,10 @@ pub fn decode_packet(decoder: &mut AudioFileDecoder) -> Option<Vec<f32>> {
 		};
 
 		if packet.track_id() != decoder.track_id {
+			skipped += 1;
+			if skipped >= MAX_SKIP_ITERATIONS {
+				return None;
+			}
 			continue;
 		}
 

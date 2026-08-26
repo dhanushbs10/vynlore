@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use rubato::{
@@ -57,12 +58,12 @@ pub struct ControlBlock {
 
 impl ControlBlock {
 	fn boundaries_lock(&self) -> std::sync::MutexGuard<'_, VecDeque<i64>> {
-		self.boundaries.lock().unwrap()
+		self.boundaries.lock().unwrap_or_else(|e| e.into_inner())
 	}
 
 	pub fn position_secs(&self) -> f64 {
-		let played = self.frames_played.load(Ordering::Relaxed);
-		let start = self.track_start_frame.load(Ordering::Relaxed);
+		let played = self.frames_played.load(Ordering::SeqCst);
+		let start = self.track_start_frame.load(Ordering::SeqCst);
 		let delta = played.saturating_sub(start) as f64;
 		delta / self.output_rate as f64
 	}
@@ -73,7 +74,7 @@ impl ControlBlock {
 		if frames <= 0 {
 			return;
 		}
-		let prev = self.frames_played.fetch_add(frames, Ordering::Relaxed);
+		let prev = self.frames_played.fetch_add(frames, Ordering::AcqRel);
 		let played = prev + frames;
 
 		if !self.has_boundary.load(Ordering::Relaxed) {
@@ -95,7 +96,7 @@ impl ControlBlock {
 		}
 		drop(boundaries);
 		if crossed {
-			self.pending_change.store(true, Ordering::Relaxed);
+			self.pending_change.store(true, Ordering::Release);
 		}
 	}
 }
@@ -113,6 +114,7 @@ pub struct PlaybackHandle {
 	pub control: Arc<ControlBlock>,
 	queue: Arc<SampleQueue>,
 	backend: Option<Backend>,
+	decode_handle: Option<JoinHandle<()>>,
 }
 
 // SAFETY: cpal::Stream is internally synchronized but lacks Send/Sync impls on some
@@ -130,17 +132,17 @@ impl PlaybackHandle {
 
 	pub fn request_seek(&self, secs: f64) {
 		let rate = self.control.output_rate as f64;
-		self.queue.clear();
 		let played = self.control.frames_played.load(Ordering::Relaxed);
 		self.control
 			.track_start_frame
 			.store(played - (secs * rate) as i64, Ordering::Relaxed);
-		*self.control.seek_to.lock().unwrap() = Some(secs);
+		*self.control.seek_to.lock().unwrap_or_else(|e| e.into_inner()) = Some(secs);
+		self.queue.clear();
 	}
 
 	/// Arms gapless continuation. Pass `None` to disarm (e.g. repeat-one).
 	pub fn set_next(&self, path: Option<PathBuf>) {
-		*self.control.next_file.lock().unwrap() = path;
+		*self.control.next_file.lock().unwrap_or_else(|e| e.into_inner()) = path;
 	}
 }
 
@@ -148,7 +150,9 @@ impl Drop for PlaybackHandle {
 	fn drop(&mut self) {
 		self.request_stop();
 		self.backend.take();
-		std::thread::sleep(Duration::from_millis(15));
+		if let Some(h) = self.decode_handle.take() {
+			let _ = h.join();
+		}
 	}
 }
 
@@ -286,14 +290,16 @@ pub fn start(
 			unreachable!("exclusive path only compiled on windows");
 		}
 	} else {
-		let (device, stream_config) = shared.as_ref().unwrap_or_else(|| {
-			panic!("shared audio device setup must be initialized before starting shared backend")
-		});
+		let (device, stream_config) = match shared.as_ref() {
+			Some(s) => s,
+			None => return Err("shared audio device setup must be initialized before starting shared backend".into()),
+		};
 		let cb_control = control.clone();
 		let cb_queue = queue.clone();
 		let cb_volume = volume_bits.clone();
 		let cb_balance = balance.clone();
 		let cb_spectrum = spectrum.clone();
+		cb_spectrum.set_channels(control.output_channels.max(1) as usize);
 		let audio_output = AudioOutput::start(stream_config, device, move |out_buf| {
 			if cb_control.paused.load(Ordering::Relaxed) {
 				out_buf.fill(0.0);
@@ -331,7 +337,7 @@ pub fn start(
 	let thread_control = control.clone();
 	let thread_queue = queue.clone();
 	let thread_preamp = preamp.clone();
-	std::thread::Builder::new()
+	let decode_handle = std::thread::Builder::new()
 		.name("vynlore-decode".into())
 		.spawn(move || {
 			run_decoder(pipeline, thread_control, thread_queue, eq, thread_preamp, app);
@@ -343,6 +349,7 @@ pub fn start(
 			control,
 			queue,
 			backend: Some(backend),
+			decode_handle: Some(decode_handle),
 		},
 		use_exclusive,
 	))
@@ -569,7 +576,7 @@ impl Pipeline {
 }
 
 fn apply_gain(gain: f32, data: &mut [f32]) {
-	let g = gain.max(0.001);
+	let g = gain.max(0.0);
 	if (g - 1.0).abs() > 1e-6 {
 		for sample in data.iter_mut() {
 			*sample *= g;
@@ -584,7 +591,7 @@ enum ChainResult {
 }
 
 fn try_chain(control: &Arc<ControlBlock>, out_rate: u32, eq: crate::audio::eq::SharedEq, preamp: Arc<AtomicU32>) -> ChainResult {
-	let next = control.next_file.lock().unwrap().take();
+	let next = control.next_file.lock().unwrap_or_else(|e| e.into_inner()).take();
 	let Some(next_path) = next else {
 		return ChainResult::NoneQueued;
 	};
@@ -596,7 +603,7 @@ fn try_chain(control: &Arc<ControlBlock>, out_rate: u32, eq: crate::audio::eq::S
 			let mark = control.frames_pushed.load(Ordering::Relaxed) as i64;
             control.boundaries_lock().push_back(mark);
 			control.has_boundary.store(true, Ordering::Relaxed);
-			*control.current_file.lock().unwrap() = next_path;
+			*control.current_file.lock().unwrap_or_else(|e| e.into_inner()) = next_path;
 			match Pipeline::new(decoder, format, out_rate, eq, preamp) {
 				Ok(p) => ChainResult::Chained(Box::new(p)),
 				Err(e) => {
@@ -635,11 +642,11 @@ fn run_decoder(
 		// The RT callback flags when playback audibly crossed into the chained
 		// file; sync the UI from here, safely off the realtime thread.
 		if control.pending_change.swap(false, Ordering::Relaxed) {
-			let path = control.current_file.lock().unwrap().display().to_string();
+			let path = control.current_file.lock().unwrap_or_else(|e| e.into_inner()).display().to_string();
 			let _ = app.emit("track-changed", TrackChangedPayload { path });
 		}
 
-		if let Some(t) = control.seek_to.lock().unwrap().take() {
+		if let Some(t) = control.seek_to.lock().unwrap_or_else(|e| e.into_inner()).take() {
 			pipeline.seek(t);
 		}
 
@@ -679,15 +686,15 @@ fn run_decoder(
 			// may arrive late (slow UI roundtrip), or the user may seek back.
 			let mut late_chained: Option<Box<Pipeline>> = None;
 			while !control.stop.load(Ordering::SeqCst) {
-				if let Some(t) = control.seek_to.lock().unwrap().take() {
+				if let Some(t) = control.seek_to.lock().unwrap_or_else(|e| e.into_inner()).take() {
 					pipeline.seek(t);
 					continue 'outer;
 				}
 				if control.pending_change.swap(false, Ordering::Relaxed) {
-					let path = control.current_file.lock().unwrap().display().to_string();
+					let path = control.current_file.lock().unwrap_or_else(|e| e.into_inner()).display().to_string();
 					let _ = app.emit("track-changed", TrackChangedPayload { path });
 				}
-				if control.next_file.lock().unwrap().is_some() {
+				if control.next_file.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
 					match try_chain(&control, out_rate, eq.clone(), preamp.clone()) {
 						ChainResult::Chained(p) => {
 							late_chained = Some(p);

@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import { usePlayer } from "../../context/PlayerContext";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { motion, AnimatePresence } from "framer-motion";
-import { X, SlidersHorizontal } from "lucide-react";
+import { motion } from "framer-motion";
+import { X, SlidersHorizontal, Volume2 } from "lucide-react";
 import { hasCover } from "../../utils/format";
 import { WaveformSeekbar } from "../WaveformSeekbar";
 
@@ -40,16 +40,18 @@ export function FullscreenNowPlaying({ onClose, onOpenEq }: { onClose: () => voi
     currentTrack,
     currentTime,
     seekTime,
+    volume,
+    setVolume,
   } = usePlayer();
   const elapsed = currentTime;
-  const [lyricsOpen, setLyricsOpen] = useState(false);
   const lineRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const lyrics = useMemo(
     () => parseLyrics(currentTrack?.lyrics || ""),
     [currentTrack?.lyrics]
   );
+
+  const hasLyrics = lyrics.length > 0;
 
   // Find active line index without allocating a new array every render
   let activeIdx = -1;
@@ -62,12 +64,12 @@ export function FullscreenNowPlaying({ onClose, onOpenEq }: { onClose: () => voi
 
   // Scroll active line into view with a short delay to ensure DOM has updated
   useEffect(() => {
-    if (!lyricsOpen || activeIdx < 0) return;
+    if (!hasLyrics || activeIdx < 0) return;
     const timer = requestAnimationFrame(() => {
       lineRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
     return () => cancelAnimationFrame(timer);
-  }, [lyricsOpen, activeIdx]);
+  }, [hasLyrics, activeIdx]);
 
   const handleSeekToLine = (time: number) => {
     seekTime(time);
@@ -95,6 +97,67 @@ export function FullscreenNowPlaying({ onClose, onOpenEq }: { onClose: () => voi
     ? convertFileSrc(currentTrack.cover_path!)
     : undefined;
 
+  // ── Album art + info block (shared by both layouts) ──────────────
+  const artAndInfo = (
+    <>
+      <div
+        className="w-[220px] h-[220px] md:w-[280px] md:h-[280px] lg:w-[320px] lg:h-[320px] rounded-lg overflow-hidden shrink-0"
+      >
+        {coverSrc ? (
+          <img className="w-full h-full object-cover" src={coverSrc} alt="" />
+        ) : (
+          <div className="w-full h-full bg-white/5" />
+        )}
+      </div>
+
+      <div className="flex flex-col items-center gap-1 w-full min-w-0 px-4">
+        <div className="text-xl md:text-2xl font-bold text-white truncate font-display text-center">
+          {currentTrack.title}
+        </div>
+        <div className="text-sm md:text-base text-white/50 truncate text-center">
+          {currentTrack.artist}
+        </div>
+        <div className="text-xs text-white/30 truncate text-center">
+          {currentTrack.album}
+        </div>
+      </div>
+    </>
+  );
+
+  // ── Lyrics column ────────────────────────────────────────────────
+  const lyricsColumn = (
+    <div className="flex flex-col h-full min-h-0">
+      <div
+        className="flex-1 overflow-y-auto px-6 pb-8 space-y-3 scrollbar-thin scroll-smooth"
+      >
+        {lyrics.map((line, i) => {
+          const isActive = i === activeIdx;
+          const isPast = i < activeIdx;
+          return (
+            <div
+              key={i}
+              ref={isActive ? lineRef : undefined}
+              data-active={isActive}
+              className={`text-center text-lg cursor-pointer transition-all duration-300 ${
+                isActive
+                  ? "text-white font-bold text-xl"
+                  : isPast
+                    ? "text-white/20"
+                    : "text-white/35 hover:text-white/60"
+              }`}
+              onClick={() => handleSeekToLine(line.time)}
+            >
+              {line.text}
+            </div>
+          );
+        })}
+        {lyrics.length === 0 && (
+          <div className="text-center text-white/30 text-lg">No lyrics found</div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -103,9 +166,6 @@ export function FullscreenNowPlaying({ onClose, onOpenEq }: { onClose: () => voi
       transition={{ duration: 0.3 }}
       className="fixed inset-0 z-[1000] flex flex-col items-center bg-bg overflow-hidden"
     >
-      {/* Subtle background gradient */}
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.03)_0%,transparent_70%)]" />
-
       {/* Close button */}
       <button
         onClick={onClose}
@@ -114,6 +174,21 @@ export function FullscreenNowPlaying({ onClose, onOpenEq }: { onClose: () => voi
       >
         <X size={20} />
       </button>
+
+      {/* Volume control */}
+      <div className="absolute top-6 right-20 z-30 flex items-center gap-2">
+        <Volume2 size={16} className="text-white/40" />
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={Math.round(volume * 100)}
+          onChange={(e) => setVolume(Number(e.target.value) / 100)}
+          className="w-24 volume-slider"
+          aria-label="Volume"
+        />
+        <span className="text-[10px] text-white/40 tabular-nums w-[28px] text-right">{Math.round(volume * 100)}%</span>
+      </div>
 
       {/* EQ button */}
       <button
@@ -125,120 +200,31 @@ export function FullscreenNowPlaying({ onClose, onOpenEq }: { onClose: () => voi
         <SlidersHorizontal size={18} />
       </button>
 
-
-      {/* Center content area */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center w-full max-w-5xl px-8 gap-5">
-
-        {/* Album art */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="w-[220px] h-[220px] md:w-[280px] md:h-[280px] lg:w-[320px] lg:h-[320px] rounded-2xl overflow-hidden shadow-[0_20px_80px_rgba(0,0,0,0.6),0_0_1px_rgba(255,255,255,0.1)]"
-        >
-          {coverSrc ? (
-            <img className="w-full h-full object-cover" src={coverSrc} alt="" />
-          ) : (
-            <div className="w-full h-full bg-white/5" />
-          )}
-        </motion.div>
-
-        {/* Track info */}
-        <div className="flex flex-col items-center gap-1 w-full min-w-0 px-4">
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-            className="text-xl md:text-2xl font-bold text-white truncate font-display text-center"
-          >
-            {currentTrack.title}
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="text-sm md:text-base text-white/50 truncate text-center"
-          >
-            {currentTrack.artist}
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-            className="text-xs text-white/30 truncate text-center"
-          >
-            {currentTrack.album}
-          </motion.div>
-        </div>
-
-        {/* Waveform seekbar with transport controls overlaid */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, duration: 0.4 }}
-          className="w-full"
-        >
-          <WaveformSeekbar maxPoints={100} />
-        </motion.div>
-
-        {/* Lyrics toggle */}
-        <motion.button
-          className="relative z-[10] px-5 py-2 rounded-full border border-white/15 text-xs font-semibold uppercase tracking-wider text-white/40 hover:text-white hover:bg-white/5 transition-colors"
-          onClick={() => setLyricsOpen((v) => !v)}
-          whileTap={{ scale: 0.95 }}
-        >
-          {lyricsOpen ? "Hide Lyrics" : "Lyrics"}
-        </motion.button>
-      </div>
-
-      {/* Lyrics overlay */}
-      <AnimatePresence>
-        {lyricsOpen && (
-          <motion.div
-            key="lyrics-panel"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.25 }}
-            className="absolute bottom-0 left-0 right-0 z-[5] h-[40vh] flex items-end"
-          >
-            <div className="w-full h-full flex flex-col">
-              {/* Spacer to push lyrics toward the bottom while keeping them scrollable */}
-              <div className="flex-1 bg-gradient-to-t from-bg/95 via-bg/70 to-transparent pointer-events-none" />
-              <div
-                ref={scrollContainerRef}
-                className="h-[35vh] overflow-y-auto px-8 pb-8 space-y-3 scrollbar-thin scroll-smooth"
-              >
-                {lyrics.length > 0 ? (
-                  lyrics.map((line, i) => {
-                    const isActive = i === activeIdx;
-                    const isPast = i < activeIdx;
-                    return (
-                      <div
-                        key={i}
-                        ref={isActive ? lineRef : undefined}
-                        data-active={isActive}
-                        className={`text-center text-lg cursor-pointer transition-all duration-300 ${
-                          isActive
-                            ? "text-white font-bold text-xl"
-                            : isPast
-                              ? "text-white/20"
-                              : "text-white/35 hover:text-white/60"
-                        }`}
-                        onClick={() => handleSeekToLine(line.time)}
-                      >
-                        {line.text}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="text-center text-white/30 text-lg">No lyrics found</div>
-                )}
-              </div>
+      {hasLyrics ? (
+        /* ── Two-column layout: art+controls | lyrics ───────────── */
+        <div className="relative z-10 flex-1 flex w-full max-w-6xl px-8 py-16 gap-8 min-h-0">
+          {/* LEFT: art + track info + waveform + transport */}
+          <div className="flex flex-col items-center justify-center gap-5 w-1/2 min-w-0">
+            {artAndInfo}
+            <div className="w-full">
+              <WaveformSeekbar />
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+
+          {/* RIGHT: lyrics inline column */}
+          <div className="flex-1 flex flex-col justify-center min-h-0">
+            {lyricsColumn}
+          </div>
+        </div>
+      ) : (
+        /* ── Single centered column (no lyrics) ─────────────────── */
+        <div className="relative z-10 flex-1 flex flex-col items-center justify-center w-full max-w-5xl px-8 gap-5">
+          {artAndInfo}
+          <div className="w-full">
+              <WaveformSeekbar />
+            </div>
+        </div>
+      )}
     </motion.div>
   );
 }

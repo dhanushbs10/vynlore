@@ -1,36 +1,61 @@
-//! 10-band parametric EQ applied on the DECODER thread (never on the realtime
-//! output path): RBJ-cookbook biquads — low-shelf / peaking / high-shelf.
-//!
-//! The decoder reads the shared `EqSettings` once per chunk and rebuilds
-//! coefficients only when rate or gains change, so slider moves apply within
-//! ~100 ms while steady-state cost is just 10 biquad passes per sample.
-
 use std::sync::{Arc, Mutex};
 
-pub const EQ_BAND_COUNT: usize = 10;
-pub const EQ_BANDS_HZ: [f32; EQ_BAND_COUNT] = [
+pub const DEFAULT_EQ_BAND_COUNT: usize = 10;
+pub const DEFAULT_EQ_BANDS_HZ: [f32; DEFAULT_EQ_BAND_COUNT] = [
 	31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
 ];
 pub const EQ_MAX_GAIN_DB: f32 = 12.0;
+pub const EQ_MAX_BOOST_DB: f32 = 12.0;
+pub const MIN_BAND_COUNT: usize = 5;
+pub const MAX_BAND_COUNT: usize = 32;
+pub const DEFAULT_Q: f32 = 1.1;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+/// Generate log-spaced frequency distribution for `count` bands.
+pub fn default_bands(count: usize) -> Vec<f32> {
+	let c = count.max(2);
+	let log_min = 31.0_f32.log10();
+	let log_max = 16000.0_f32.log10();
+	(0..c)
+		.map(|i| {
+			let t = i as f32 / (c - 1) as f32;
+			10f32.powf(log_min + t * (log_max - log_min))
+		})
+		.collect()
+}
+
+#[derive(Clone, Debug)]
 pub struct EqSettings {
 	pub enabled: bool,
-	pub gains: [f32; EQ_BAND_COUNT], // dB, clamped to ±EQ_MAX_GAIN_DB
+	pub parametric: bool,
+	pub gains: Vec<f32>,
+	pub qs: Vec<f32>,
+	pub band_hz: Vec<f32>,
+	pub bass_boost_db: f32,
+	pub treble_boost_db: f32,
 }
 
 impl Default for EqSettings {
 	fn default() -> Self {
+		let hz = DEFAULT_EQ_BANDS_HZ.to_vec();
+		let count = hz.len();
 		Self {
 			enabled: false,
-			gains: [0.0; EQ_BAND_COUNT],
+			parametric: false,
+			gains: vec![0.0; count],
+			qs: vec![DEFAULT_Q; count],
+			band_hz: hz,
+			bass_boost_db: 0.0,
+			treble_boost_db: 0.0,
 		}
 	}
 }
 
 impl EqSettings {
-	fn is_neutral(&self) -> bool {
-		!self.enabled || self.gains.iter().all(|g| g.abs() < 0.05)
+	pub fn is_neutral(&self) -> bool {
+		!self.enabled
+			|| (self.gains.iter().all(|g| g.abs() < 0.05)
+				&& self.bass_boost_db.abs() < 0.05
+				&& self.treble_boost_db.abs() < 0.05)
 	}
 }
 
@@ -40,7 +65,6 @@ pub fn shared_eq() -> SharedEq {
 	Arc::new(Mutex::new(EqSettings::default()))
 }
 
-/// Normalized biquad coefficients (Direct Form I).
 #[derive(Clone, Copy)]
 struct Coeffs {
 	b0: f64,
@@ -61,13 +85,7 @@ struct Biquad {
 
 impl Biquad {
 	fn new(c: Coeffs) -> Self {
-		Self {
-			c,
-			x1: 0.0,
-			x2: 0.0,
-			y1: 0.0,
-			y2: 0.0,
-		}
+		Self { c, x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0 }
 	}
 
 	#[inline]
@@ -85,38 +103,50 @@ impl Biquad {
 	}
 }
 
-fn design_band(band: usize, gain_db: f32, sample_rate: u32) -> Coeffs {
-	let f0 = (EQ_BANDS_HZ[band] as f64).min(sample_rate as f64 * 0.45);
-	let a = 10f64.powf(gain_db as f64 / 40.0);
-	let w0 = 2.0 * std::f64::consts::PI * f0 / sample_rate as f64;
+fn design_band(f0: f32, gain_db: f32, q: f32, is_first: bool, is_last: bool, sample_rate: u32) -> Coeffs {
+	if gain_db.abs() < 0.05 {
+		return Coeffs { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
+	}
+
+	if is_first && !is_last {
+		return design_shelf(f0, gain_db, sample_rate, false);
+	} else if is_last && !is_first {
+		return design_shelf(f0, gain_db, sample_rate, true);
+	}
+
+	let f0_f64 = (f0 as f64).min(sample_rate as f64 * 0.45);
+	let a = 10f64.powf(gain_db as f64 / 20.0);
+	let w0 = 2.0 * std::f64::consts::PI * f0_f64 / sample_rate as f64;
 	let (sin_w0, cos_w0) = w0.sin_cos();
-	let q: f64 = 1.1;
+	let q_f64 = q as f64;
+
+	// Peaking
+	let alpha = sin_w0 / (2.0 * q_f64);
+	let b0 = 1.0 + alpha * a;
+	let b1 = -2.0 * cos_w0;
+	let b2 = 1.0 - alpha * a;
+	let a0 = 1.0 + alpha / a;
+	let a1 = -2.0 * cos_w0;
+	let a2 = 1.0 - alpha / a;
+
+	Coeffs { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+}
+
+fn design_shelf(f0: f32, gain_db: f32, sample_rate: u32, high: bool) -> Coeffs {
+	let f0_f64 = (f0 as f64).min(sample_rate as f64 * 0.45);
+	let a = 10f64.powf(gain_db as f64 / 20.0);
+	let w0 = 2.0 * std::f64::consts::PI * f0_f64 / sample_rate as f64;
+	let (sin_w0, cos_w0) = w0.sin_cos();
 
 	if gain_db.abs() < 0.05 {
-		return Coeffs {
-			b0: 1.0,
-			b1: 0.0,
-			b2: 0.0,
-			a1: 0.0,
-			a2: 0.0,
-		};
+		return Coeffs { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
 	}
 
 	let (b0, b1, b2, a0, a1, a2);
-	if band == 0 {
-		// Low shelf (S = 1)
-		let alpha = sin_w0 / 2.0 * a.sqrt();
-		let sq = 2.0 * a.sqrt() * alpha;
-		b0 = a * ((a + 1.0) - (a - 1.0) * cos_w0 + sq);
-		b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
-		b2 = a * ((a + 1.0) - (a - 1.0) * cos_w0 - sq);
-		a0 = (a + 1.0) + (a - 1.0) * cos_w0 + sq;
-		a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cos_w0);
-		a2 = (a + 1.0) + (a - 1.0) * cos_w0 - sq;
-	} else if band == EQ_BAND_COUNT - 1 {
-		// High shelf (S = 1)
-		let alpha = sin_w0 / 2.0 * a.sqrt();
-		let sq = 2.0 * a.sqrt() * alpha;
+	let alpha = sin_w0 / 2.0 * a.sqrt();
+	let sq = 2.0 * a.sqrt() * alpha;
+
+	if high {
 		b0 = a * ((a + 1.0) + (a - 1.0) * cos_w0 + sq);
 		b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0);
 		b2 = a * ((a + 1.0) + (a - 1.0) * cos_w0 - sq);
@@ -124,34 +154,31 @@ fn design_band(band: usize, gain_db: f32, sample_rate: u32) -> Coeffs {
 		a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cos_w0);
 		a2 = (a + 1.0) - (a - 1.0) * cos_w0 - sq;
 	} else {
-		// Peaking
-		let alpha = sin_w0 / (2.0 * q);
-		b0 = 1.0 + alpha * a;
-		b1 = -2.0 * cos_w0;
-		b2 = 1.0 - alpha * a;
-		a0 = 1.0 + alpha / a;
-		a1 = -2.0 * cos_w0;
-		a2 = 1.0 - alpha / a;
+		b0 = a * ((a + 1.0) - (a - 1.0) * cos_w0 + sq);
+		b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0);
+		b2 = a * ((a + 1.0) - (a - 1.0) * cos_w0 - sq);
+		a0 = (a + 1.0) + (a - 1.0) * cos_w0 + sq;
+		a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cos_w0);
+		a2 = (a + 1.0) + (a - 1.0) * cos_w0 - sq;
 	}
 
-	Coeffs {
-		b0: b0 / a0,
-		b1: b1 / a0,
-		b2: b2 / a0,
-		a1: a1 / a0,
-		a2: a2 / a0,
-	}
+	Coeffs { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
 }
 
-/// Per-stream processor owned by a Pipeline (decoder thread only).
 pub struct EqProcessor {
 	settings: SharedEq,
 	sample_rate: u32,
 	channels: usize,
-	// filters[channel][band]
-	filters: Vec<Vec<Biquad>>,
+	band_filters: Vec<Vec<Biquad>>,
+	bass_filters: Vec<Biquad>,
+	treble_filters: Vec<Biquad>,
 	cached_rate: u32,
-	cached_gains: [f32; EQ_BAND_COUNT],
+	cached_gains: Vec<f32>,
+	cached_qs: Vec<f32>,
+	cached_band_hz: Vec<f32>,
+	cached_parametric: bool,
+	cached_bass: f32,
+	cached_treble: f32,
 }
 
 impl EqProcessor {
@@ -160,60 +187,150 @@ impl EqProcessor {
 			settings,
 			sample_rate,
 			channels,
-			filters: Vec::new(),
+			band_filters: Vec::new(),
+			bass_filters: Vec::new(),
+			treble_filters: Vec::new(),
 			cached_rate: 0,
-			cached_gains: [f32::NAN; EQ_BAND_COUNT],
+			cached_gains: Vec::new(),
+			cached_qs: Vec::new(),
+			cached_band_hz: Vec::new(),
+			cached_parametric: false,
+			cached_bass: f32::NAN,
+			cached_treble: f32::NAN,
 		}
 	}
 
 	pub fn reset(&mut self) {
-		for ch in &mut self.filters {
+		for ch in &mut self.band_filters {
 			for bq in ch {
-				bq.x1 = 0.0;
-				bq.x2 = 0.0;
-				bq.y1 = 0.0;
-				bq.y2 = 0.0;
+				bq.x1 = 0.0; bq.x2 = 0.0; bq.y1 = 0.0; bq.y2 = 0.0;
 			}
 		}
+		for bq in &mut self.bass_filters {
+			bq.x1 = 0.0; bq.x2 = 0.0; bq.y1 = 0.0; bq.y2 = 0.0;
+		}
+		for bq in &mut self.treble_filters {
+			bq.x1 = 0.0; bq.x2 = 0.0; bq.y1 = 0.0; bq.y2 = 0.0;
+		}
 	}
 
-	fn ensure_filters(&mut self, gains: [f32; EQ_BAND_COUNT]) {
-		if self.cached_rate == self.sample_rate && self.cached_gains == gains && !self.filters.is_empty()
-		{
+	fn needs_rebuild(&self, s: &EqSettings) -> bool {
+		self.cached_rate != self.sample_rate
+			|| self.cached_parametric != s.parametric
+			|| self.cached_bass != s.bass_boost_db
+			|| self.cached_treble != s.treble_boost_db
+			|| self.cached_gains.len() != s.gains.len()
+			|| self.cached_qs.len() != s.qs.len()
+			|| self.cached_band_hz.len() != s.band_hz.len()
+			|| self.cached_gains.iter().zip(s.gains.iter()).any(|(a, b)| (a - b).abs() > 1e-6)
+			|| self.cached_qs.iter().zip(s.qs.iter()).any(|(a, b)| (a - b).abs() > 1e-6)
+			|| self.cached_band_hz.iter().zip(s.band_hz.iter()).any(|(a, b)| (a - b).abs() > 0.5)
+	}
+
+	fn ensure_filters(&mut self, s: &EqSettings) {
+		if !self.needs_rebuild(s) && !self.band_filters.is_empty() {
 			return;
 		}
-		self.filters = (0..self.channels)
-			.map(|_| {
-				(0..EQ_BAND_COUNT)
-					.map(|band| Biquad::new(design_band(band, gains[band], self.sample_rate)))
-					.collect()
-			})
-			.collect();
+		let band_count = s.gains.len();
+
+		if !self.band_filters.is_empty()
+			&& self.band_filters[0].len() == band_count
+			&& self.cached_parametric == s.parametric
+		{
+			for ch_filters in &mut self.band_filters {
+				for (i, bq) in ch_filters.iter_mut().enumerate() {
+					let q = if s.parametric {
+						s.qs.get(i).copied().unwrap_or(DEFAULT_Q)
+					} else {
+						DEFAULT_Q
+					};
+					let is_first = i == 0 && band_count > 1;
+					let is_last = i == band_count - 1 && band_count > 1;
+					let hz = s.band_hz.get(i).copied().unwrap_or(1000.0);
+					let gain = s.gains.get(i).copied().unwrap_or(0.0);
+					bq.c = design_band(hz, gain, q, is_first, is_last, self.sample_rate);
+				}
+			}
+			for (ch, bq) in self.bass_filters.iter_mut().enumerate() {
+				let _ = ch;
+				bq.c = design_shelf(100.0, s.bass_boost_db, self.sample_rate, false);
+			}
+			for (ch, bq) in self.treble_filters.iter_mut().enumerate() {
+				let _ = ch;
+				bq.c = design_shelf(8000.0, s.treble_boost_db, self.sample_rate, true);
+			}
+		} else {
+			self.band_filters = (0..self.channels)
+				.map(|_| {
+					(0..band_count)
+						.map(|i| {
+							let q = if s.parametric {
+								s.qs.get(i).copied().unwrap_or(DEFAULT_Q)
+							} else {
+								DEFAULT_Q
+							};
+							let is_first = i == 0 && band_count > 1;
+							let is_last = i == band_count - 1 && band_count > 1;
+							let hz = s.band_hz.get(i).copied().unwrap_or(1000.0);
+							let gain = s.gains.get(i).copied().unwrap_or(0.0);
+							Biquad::new(design_band(hz, gain, q, is_first, is_last, self.sample_rate))
+						})
+						.collect()
+				})
+				.collect();
+
+			self.bass_filters = (0..self.channels)
+				.map(|_| Biquad::new(design_shelf(100.0, s.bass_boost_db, self.sample_rate, false)))
+				.collect();
+			self.treble_filters = (0..self.channels)
+				.map(|_| Biquad::new(design_shelf(8000.0, s.treble_boost_db, self.sample_rate, true)))
+				.collect();
+		}
+
 		self.cached_rate = self.sample_rate;
-		self.cached_gains = gains;
+		self.cached_gains = s.gains.clone();
+		self.cached_qs = s.qs.clone();
+		self.cached_band_hz = s.band_hz.clone();
+		self.cached_parametric = s.parametric;
+		self.cached_bass = s.bass_boost_db;
+		self.cached_treble = s.treble_boost_db;
 	}
 
-	/// Applies EQ in-place on interleaved samples.
 	pub fn process_interleaved(&mut self, samples: &mut [f32]) {
 		let snapshot = match self.settings.lock() {
-			Ok(s) => *s,
+			Ok(s) => s.clone(),
 			Err(_) => return,
 		};
 		if snapshot.is_neutral() {
-			if !self.filters.is_empty() {
+			if !self.band_filters.is_empty() {
 				self.reset();
-				self.filters.clear();
-				self.cached_gains = [f32::NAN; EQ_BAND_COUNT];
+				self.band_filters.clear();
+				self.bass_filters.clear();
+				self.treble_filters.clear();
+				self.cached_gains = Vec::new();
+				self.cached_qs = Vec::new();
+				self.cached_band_hz = Vec::new();
 			}
 			return;
 		}
 
-		self.ensure_filters(snapshot.gains);
+		self.ensure_filters(&snapshot);
 
 		for frame in samples.chunks_exact_mut(self.channels.max(1)) {
 			for (c, s) in frame.iter_mut().enumerate() {
 				let mut v = *s as f64;
-				for bq in &mut self.filters[c] {
+				// Bass shelf
+				if let Some(bq) = self.bass_filters.get_mut(c) {
+					v = bq.process(v);
+				}
+				// EQ bands
+				if let Some(bands) = self.band_filters.get_mut(c) {
+					for bq in bands {
+						v = bq.process(v);
+					}
+				}
+				// Treble shelf
+				if let Some(bq) = self.treble_filters.get_mut(c) {
 					v = bq.process(v);
 				}
 				*s = v.clamp(-1.0, 1.0) as f32;

@@ -58,8 +58,16 @@ fn main() {
       }
     })
     .setup(|app| {
-      let db_path = app.path().app_data_dir().expect("Failed to get app data dir").join("library.db");
-      std::fs::create_dir_all(db_path.parent().unwrap()).expect("Failed to create data dir");
+      let db_path = match app.path().app_data_dir() {
+        Ok(dir) => dir.join("library.db"),
+        Err(e) => { eprintln!("Failed to get app data dir: {}", e); return Ok(()); }
+      };
+      if let Some(parent) = db_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+          eprintln!("Failed to create data dir: {}", e);
+          return Ok(());
+        }
+      }
       let db = LibraryDb::new(&db_path).expect("Failed to open database");
       // Files deleted/moved while the app was off would otherwise linger as
       // unplayable ghost entries.
@@ -74,7 +82,6 @@ fn main() {
         playback: std::sync::Mutex::new(None),
         volume: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
         eq: crate::audio::eq::shared_eq(),
-        current_path: std::sync::Mutex::new(None),
         spectrum: std::sync::Arc::new(crate::audio::spectrum::SpectrumAnalyzer::new()),
         balance: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
         preamp: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
@@ -176,7 +183,14 @@ fn main() {
       commands::get_watched_folder,
       commands::set_watched_folder,
       commands::rescan_folder,
-      commands::delete_playlist
+      commands::delete_playlist,
+      commands::rename_playlist,
+      commands::set_playlist_cover,
+      commands::get_playlist_cover,
+      commands::set_playlist_color,
+      commands::get_playlist_color,
+      commands::get_waveform,
+      commands::read_text_file
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

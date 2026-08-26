@@ -124,6 +124,12 @@ export function SearchPalette({
 		[groups]
 	);
 
+	const flatIndexByKey = useMemo(() => {
+		const map = new Map<string, number>();
+		flat.forEach((item, i) => map.set(item.key, i));
+		return map;
+	}, [flat]);
+
 	useEffect(() => setActiveIdx(0), [query]);
 
 	useEffect(() => {
@@ -172,7 +178,7 @@ export function SearchPalette({
 				initial={{ opacity: 0 }}
 				animate={{ opacity: 1 }}
 				exit={{ opacity: 0 }}
-				className="fixed inset-0 z-[2000] bg-black/60 backdrop-blur-sm flex justify-center pt-[12vh]"
+				className="fixed inset-0 z-[2000] bg-black/70 flex justify-center pt-[12vh]"
 				onMouseDown={actions.onClose}
 			>
 				<motion.div
@@ -180,7 +186,7 @@ export function SearchPalette({
 					animate={{ opacity: 1, scale: 1, y: 0 }}
 					exit={{ opacity: 0, scale: 0.95, y: 10 }}
 					transition={{ type: "spring", stiffness: 400, damping: 30 }}
-					className="w-[min(640px,90vw)] max-h-[62vh] bg-bg-elevated border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+					className="w-[min(640px,90vw)] max-h-[62vh] bg-[#111] border border-border rounded-lg flex flex-col overflow-hidden"
 					onMouseDown={(e) => e.stopPropagation()}
 				>
 					<div className="flex items-center gap-3 px-5 py-4 border-b border-border">
@@ -208,22 +214,21 @@ export function SearchPalette({
 								return (
 									<div key={kind}>
 										<div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-text-muted px-2.5 pt-2.5 pb-1">{KIND_LABEL[kind]}</div>
-										{items.map((item) => {
-											const idx = flat.indexOf(item);
-											const isActive = idx === activeIdx;
+									{items.map((item) => {
+										const idx = flatIndexByKey.get(item.key) ?? 0;
+										const isActive = idx === activeIdx;
 											return (
-												<motion.div
-													key={item.key}
-													whileTap={{ scale: 0.97 }}
-													className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-bg-hover transition-colors ${isActive ? "bg-accent-soft" : ""}`}
+											<motion.div
+												key={item.key}
+												className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${isActive ? "bg-white/5" : ""}`}
 													data-active={isActive ? "" : undefined}
 													onMouseEnter={() => setActiveIdx(idx)}
 													onClick={() => activate(item)}
 												>
 													{item.cover ? (
-														<img className="w-9 h-9 rounded-lg object-cover shrink-0" src={item.cover} alt="" />
+														<img className="w-9 h-9 rounded-sm object-cover shrink-0" src={item.cover} alt="" />
 													) : (
-														<div className="w-9 h-9 rounded-lg bg-bg-surface flex items-center justify-center text-text-muted shrink-0">
+														<div className="w-9 h-9 rounded-sm bg-bg-surface flex items-center justify-center text-text-muted shrink-0">
 															<Icon size={14} />
 														</div>
 													)}

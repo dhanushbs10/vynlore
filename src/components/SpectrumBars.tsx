@@ -28,6 +28,10 @@ export function SpectrumBars({ bars = 64, className = "" }: Props) {
   const smoothRef = useRef<number[]>(new Array(bars).fill(0));
 
   useEffect(() => {
+    smoothRef.current = new Array(bars).fill(0);
+  }, [bars]);
+
+  useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
     const unlisten = listen<SpectrumPayload>("spectrum-data", (event) => {

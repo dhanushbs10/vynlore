@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { usePlayer } from "../../context/PlayerContext";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { formatDuration, formatSampleRate, hasCover } from "../../utils/format";
-import { motion } from "framer-motion";
 import type { Track } from "../../types";
 
 export function TracksView({ tracks }: { tracks: Track[] }) {
@@ -30,7 +29,7 @@ export function TracksView({ tracks }: { tracks: Track[] }) {
     : sorted;
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+    <div>
       <div className="mb-6">
         <h1 className="font-display text-2xl font-bold text-text tracking-tight">Library</h1>
         <p className="text-sm text-text-secondary mt-1">{tracks.length} tracks</p>
@@ -38,7 +37,7 @@ export function TracksView({ tracks }: { tracks: Track[] }) {
 
       <div className="mb-5">
         <input
-          className="w-full max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors"
+          className="w-full max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-white/30 transition-colors"
           placeholder="Search tracks, artists, albums…"
           value={query}
           onChange={e => setQuery(e.target.value)}
@@ -47,7 +46,6 @@ export function TracksView({ tracks }: { tracks: Track[] }) {
 
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-text-muted">
-          <div className="text-3xl mb-3 opacity-60">♪</div>
           <div className="text-base font-semibold text-text-secondary">No tracks found</div>
           <div className="text-sm mt-1">Try adjusting your search query.</div>
         </div>
@@ -81,7 +79,7 @@ export function TracksView({ tracks }: { tracks: Track[] }) {
           })}
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }
 
@@ -102,14 +100,14 @@ function TrackRow({
 }) {
   return (
     <div
-      className={`grid grid-cols-[48px_40px_1fr_1fr_1fr_70px_70px_70px] items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer hover:bg-bg-hover transition-colors ${isActive ? "bg-accent-soft" : ""}`}
+      className={`grid grid-cols-[48px_40px_1fr_1fr_1fr_70px_70px_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${isActive ? "bg-white/5" : ""}`}
       onClick={() => playTrack(track, allTracks)}
     >
       <div className="w-12">
         {coverSrc ? (
-          <img className="w-10 h-10 rounded-md object-cover" src={coverSrc} alt="" />
+          <img className="w-10 h-10 rounded-sm object-cover" src={coverSrc} alt="" />
         ) : (
-          <div className="w-10 h-10 rounded-md bg-bg-surface" />
+          <div className="w-10 h-10 rounded-sm bg-bg-surface" />
         )}
       </div>
       <div className="text-sm text-text-secondary text-center">

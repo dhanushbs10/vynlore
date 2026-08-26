@@ -30,7 +30,7 @@ pub fn start_watcher(
 	db: Arc<Mutex<LibraryDb>>,
 	folder_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-	let mut slot = watcher_slot().lock().unwrap();
+	let mut slot = watcher_slot().lock().unwrap_or_else(|e| e.into_inner());
 	if let Some((_, stop_flag)) = slot.take() {
 		stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
 	}
@@ -52,7 +52,7 @@ pub fn start_watcher(
 				}
 				let is_removal = matches!(event.kind, EventKind::Remove(_));
 				let now = Instant::now();
-				let mut map = cb_pending.lock().unwrap();
+				let mut map = cb_pending.lock().unwrap_or_else(|e| e.into_inner());
 				for path in event.paths {
 					let supported = path
 						.extension()
@@ -64,10 +64,10 @@ pub fn start_watcher(
 					if is_removal {
 						// A vanished file cancels any queued add for it.
 						map.remove(&path);
-						cb_removals.lock().unwrap().insert(path, now);
+						cb_removals.lock().unwrap_or_else(|e| e.into_inner()).insert(path, now);
 					} else if path.is_file() {
 						// It's back (or still there) — drop queued removals.
-						cb_removals.lock().unwrap().remove(&path);
+						cb_removals.lock().unwrap_or_else(|e| e.into_inner()).remove(&path);
 						map.insert(path, now);
 					}
 				}
@@ -94,7 +94,7 @@ pub fn start_watcher(
 				std::thread::sleep(POLL_INTERVAL);
 
 				let due: Vec<PathBuf> = {
-					let mut map = pending.lock().unwrap();
+					let mut map = pending.lock().unwrap_or_else(|e| e.into_inner());
 					let cutoff = Instant::now() - DEBOUNCE;
 					let expired: Vec<PathBuf> = map
 						.iter()
@@ -108,7 +108,7 @@ pub fn start_watcher(
 				};
 
 				let due_removed: Vec<PathBuf> = {
-					let mut map = removals.lock().unwrap();
+					let mut map = removals.lock().unwrap_or_else(|e| e.into_inner());
 					let cutoff = Instant::now() - DEBOUNCE;
 					let expired: Vec<PathBuf> = map
 						.iter()

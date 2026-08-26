@@ -1,7 +1,7 @@
 import { useMemo, useCallback } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePlayer } from "../../context/PlayerContext";
-import { ArrowLeft, Play, Shuffle } from "lucide-react";
+import { ArrowLeft, Play, Shuffle, Repeat, Repeat1 } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDuration, hasCover } from "../../utils/format";
 import { fisherYates } from "../../utils/shuffle";
@@ -20,10 +20,13 @@ export function GenreDetailView({
   onBack,
   playTrack,
 }: GenreDetailViewProps) {
-  const { isShuffle, toggleShuffle } = usePlayer();
+  const { isShuffle, toggleShuffle, repeatMode, toggleRepeat } = usePlayer();
 
   const filtered = useMemo(() => {
-    const list = tracks.filter((t) => (t.genre || "").trim() === genre);
+    const list = tracks.filter((t) => {
+      const g = (t.genre || "").trim();
+      return (!g && genre === "Uncategorized") || g === genre;
+    });
     list.sort((a, b) => {
       const an = a.track_number ?? 0;
       const bn = b.track_number ?? 0;
@@ -59,7 +62,7 @@ export function GenreDetailView({
         </div>
         <div className="flex gap-2.5 ml-auto">
           <motion.button
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-bg-raised text-text-secondary text-xs font-semibold hover:bg-bg-hover hover:text-text transition-colors w-auto"
+            className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white/5 hover:text-text transition-colors w-auto"
             onClick={handleShuffle}
             whileTap={{ scale: 0.95 }}
             aria-label="Shuffle genre"
@@ -68,13 +71,20 @@ export function GenreDetailView({
             <span>Shuffle</span>
           </motion.button>
           <motion.button
-            className="w-11 h-11 rounded-full bg-accent text-bg flex items-center justify-center shadow-[0_0_20px_var(--color-accent-glow)] hover:scale-105 active:scale-95 transition-transform"
+            className="w-11 h-11 rounded-full bg-white text-black flex items-center justify-center transition-transform"
             onClick={handlePlayGenre}
             whileTap={{ scale: 0.95 }}
             aria-label="Play genre"
           >
             <Play size={18} fill="currentColor" />
           </motion.button>
+          <button
+            className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border-none bg-transparent p-0 cursor-pointer transition-colors ${repeatMode === "off" ? "text-text-muted" : "text-white"}`}
+            aria-label="Repeat"
+            onClick={toggleRepeat}
+          >
+            {repeatMode === "one" ? <Repeat1 size={15} /> : <Repeat size={15} />}
+          </button>
         </div>
       </div>
 
@@ -96,15 +106,14 @@ export function GenreDetailView({
             return (
               <motion.div
                 key={track.id}
-                variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
-                whileHover={{ y: -3, transition: { type: "spring", stiffness: 400, damping: 25 } }}
+              variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
                 className="w-[170px] cursor-pointer group"
                 onClick={() => playTrack(track, filtered)}
               >
                 {coverSrc ? (
-                  <img className="w-full aspect-square object-cover rounded-xl shadow-lg group-hover:shadow-xl transition-shadow" src={coverSrc} alt={track.title} />
+                  <img className="w-full aspect-square object-cover rounded-md" src={coverSrc} alt={track.title} />
                 ) : (
-                  <div className="w-full aspect-square bg-bg-surface rounded-xl" />
+                  <div className="w-full aspect-square bg-bg-surface rounded-md" />
                 )}
                 <div className="mt-2 text-sm font-medium text-text truncate" title={track.title}>
                   {track.title}

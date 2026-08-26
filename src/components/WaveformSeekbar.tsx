@@ -1,161 +1,129 @@
-import { useEffect, useState, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { isTauri } from "@tauri-apps/api/core";
-import { motion } from "framer-motion";
-import { SkipBack, SkipForward, Repeat, Shuffle } from "lucide-react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { usePlayer } from "../context/PlayerContext";
-import { formatDuration } from "../utils/format";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { motion } from "framer-motion";
+import { Shuffle, SkipBack, SkipForward, Repeat, Repeat1 } from "lucide-react";
 
-interface Props {
-  maxPoints?: number;
-}
-
-const SPRING_FRAMES = 8;
-const BAR_MIN_HEIGHT = 3;
-const BAR_MAX_HEIGHT = 80;
+const MAX_POINTS = 80;
 const BAR_GAP = 1;
 
-function sproutFactor(age: number): number {
-  if (age >= SPRING_FRAMES) return 1;
-  const t = age / SPRING_FRAMES;
-  // ease-out cubic
-  return 1 - Math.pow(1 - t, 3);
-}
-
-interface WaveformPoint {
-  value: number;
-  age: number;
-}
-
-export function WaveformSeekbar({ maxPoints = 100 }: Props) {
+export function WaveformSeekbar() {
   const {
-    currentTrack,
-    currentTime,
-    isPlaying,
-    isPaused,
-    togglePlayPause,
-    playNext,
-    playPrev,
-    seekTime,
-    isShuffle,
-    repeatMode,
-    toggleShuffle,
-    toggleRepeat,
+    currentTime, currentTrack, isPlaying, isPaused, seekTime,
+    togglePlayPause, toggleShuffle, toggleRepeat, playNext, playPrev,
+    isShuffle, repeatMode,
   } = usePlayer();
+  const [rawPeaks, setRawPeaks] = useState<number[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const elapsed = currentTime;
   const duration = currentTrack?.duration_secs ?? 0;
 
-  const [points, setPoints] = useState<WaveformPoint[]>([]);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const pointsRef = useRef<WaveformPoint[]>([]);
-
-  // Keep ref in sync
-  pointsRef.current = points;
-
   useEffect(() => {
     if (!isTauri() || !currentTrack) return;
     let disposed = false;
-    const unlisten = listen<{ bins: number[] }>("spectrum-data", (event) => {
-      if (disposed) return;
-      if (!isPlaying || isPaused) return;
-      const bins = event.payload.bins;
-      let sum = 0;
-      for (let i = 0; i < bins.length; i++) sum += bins[i] * bins[i];
-      const rms = Math.sqrt(sum / bins.length);
-      setPoints((prev) => {
-        // Build new array: age existing points, add new one
-        const filtered: WaveformPoint[] = [];
-        for (let i = 0; i < prev.length; i++) {
-          const aged = prev[i].age + 1;
-          if (aged < maxPoints) {
-            filtered.push({ value: prev[i].value, age: aged });
-          }
-        }
-        filtered.push({ value: rms, age: 0 });
-        // Cap to maxPoints
-        if (filtered.length > maxPoints) {
-          filtered.splice(0, filtered.length - maxPoints);
-        }
-        return filtered;
+    setRawPeaks([]);
+    invoke<number[]>("get_waveform", { filePath: currentTrack.file_path })
+      .then((peaks) => {
+        if (!disposed && peaks && peaks.length > 0) setRawPeaks(peaks);
+      })
+      .catch((e) => {
+        console.error("[Waveform] get_waveform failed:", e);
       });
-    });
-    return () => {
-      disposed = true;
-      unlisten.then((fn) => fn());
-    };
-  }, [maxPoints, currentTrack?.id, isPlaying, isPaused]);
+    return () => { disposed = true; };
+  }, [currentTrack?.id, currentTrack?.file_path]);
 
-  // Clear points when track changes
   useEffect(() => {
-    setPoints([]);
-  }, [currentTrack?.id]);
+    if (!isTauri()) return;
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      if (disposed) return;
+      const unlisten = listen<{ file_path: string }>("waveform-ready", (event) => {
+        const path = event.payload.file_path;
+        if (currentTrack?.file_path !== path) return;
+        invoke<number[]>("get_waveform", { filePath: path })
+          .then((peaks) => {
+            if (!disposed && peaks && peaks.length > 0) setRawPeaks(peaks);
+          })
+          .catch(() => {});
+      });
+      cleanup = () => { unlisten.then((fn) => fn()); };
+    });
+    return () => { disposed = true; cleanup?.(); };
+  }, [currentTrack?.file_path]);
 
-  const handleWaveformClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    seekTime(ratio * duration);
-  };
+  const bars = useMemo(() => {
+    if (rawPeaks.length === 0) return [];
+    if (rawPeaks.length <= MAX_POINTS) return rawPeaks;
+    const step = rawPeaks.length / MAX_POINTS;
+    return Array.from({ length: MAX_POINTS }, (_, i) => {
+      const start = Math.floor(i * step);
+      const end = Math.min(Math.floor((i + 1) * step), rawPeaks.length);
+      let max = 0;
+      for (let j = start; j < end; j++) if (rawPeaks[j] > max) max = rawPeaks[j];
+      return max;
+    });
+  }, [rawPeaks]);
 
-  if (!currentTrack) return null;
+  const currentBarIndex = useMemo(() => {
+    if (bars.length === 0 || duration <= 0) return -1;
+    return Math.min(bars.length - 1, Math.floor((elapsed / duration) * bars.length));
+  }, [bars.length, elapsed, duration]);
 
-  const barWidth = Math.max(2, Math.min(8, (containerRef.current?.offsetWidth ?? 600) / (maxPoints * 2) - BAR_GAP));
+  const playheadPct = duration > 0 ? Math.min(100, Math.max(0, (elapsed / duration) * 100)) : 0;
+
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (duration <= 0) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seekTime(pct * duration);
+  }
 
   return (
-    <div className="relative w-full select-none" style={{ height: 160 }}>
-      {/* Full-width clickable area for seeking */}
+    <div className="w-full flex flex-col gap-2">
       <div
         ref={containerRef}
-        className="absolute inset-0 cursor-pointer z-0"
-        onClick={handleWaveformClick}
-      />
-
-      {/* LEFT HALF — scrolling historical waveform */}
-      <div className="absolute left-0 top-0 bottom-0 w-1/2 flex items-center overflow-hidden z-[1]">
+        className="relative w-full cursor-pointer"
+        style={{ height: 80, minWidth: 200 }}
+        onClick={handleClick}
+      >
+        {/* Bars — flex-1 per bar, fills full width, no padding, no JS width */}
         <div
-          className="flex items-center h-full px-1"
+          className="absolute inset-0 flex items-stretch pointer-events-none z-[1] overflow-hidden"
           style={{ gap: `${BAR_GAP}px` }}
         >
-          {points.map((p, i) => {
-            const factor = sproutFactor(p.age);
-            const h = Math.max(BAR_MIN_HEIGHT, p.value * factor * BAR_MAX_HEIGHT);
-            const opacity = 0.4 + Math.min(p.value, 0.6) * 0.6;
+          {bars.map((peak, i) => {
+            const h = Math.max(3, peak * 100);
+            const played = i <= currentBarIndex;
             return (
-              <div
-                key={i}
-                className="flex-shrink-0 flex flex-col items-center justify-center"
-                style={{
-                  width: `${barWidth}px`,
-                  height: "100%",
-                  gap: "2px",
-                }}
-              >
-                {/* Top half (mirrored) */}
-                <div
-                  className="flex-1 flex items-end"
-                  style={{ minHeight: 0 }}
-                >
-                  <div
-                    className="w-full rounded-t-sm"
+              <div key={i} className="flex-1 flex flex-col" style={{ minWidth: 0 }}>
+                {/* Top half */}
+                <div className="flex-1 flex items-end" style={{ minHeight: 0 }}>
+                  <motion.div
+                    key={`${currentTrack?.id}-${i}`}
+                    className="w-full rounded-t-[1px]"
+                    initial={{ height: "0%" }}
+                    animate={{ height: `${h}%` }}
+                    transition={{ duration: 0.25, delay: i * 0.008, ease: "easeOut" }}
                     style={{
-                      height: `${h}%`,
-                      backgroundColor: `rgba(255,255,255,${opacity})`,
-                      transition: "height 60ms linear",
+                      backgroundColor: played ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.15)",
+                      transition: "background-color 150ms ease-out",
                     }}
                   />
                 </div>
                 {/* Bottom half */}
-                <div
-                  className="flex-1 flex items-start"
-                  style={{ minHeight: 0 }}
-                >
-                  <div
-                    className="w-full rounded-b-sm"
+                <div className="flex-1 flex items-start" style={{ minHeight: 0 }}>
+                  <motion.div
+                    key={`${currentTrack?.id}-${i}`}
+                    className="w-full rounded-b-[1px]"
+                    initial={{ height: "0%" }}
+                    animate={{ height: `${h}%` }}
+                    transition={{ duration: 0.25, delay: i * 0.008, ease: "easeOut" }}
                     style={{
-                      height: `${h}%`,
-                      backgroundColor: `rgba(255,255,255,${opacity * 0.85})`,
-                      transition: "height 60ms linear",
+                      backgroundColor: played ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.1)",
+                      transition: "background-color 150ms ease-out",
                     }}
                   />
                 </div>
@@ -163,85 +131,88 @@ export function WaveformSeekbar({ maxPoints = 100 }: Props) {
             );
           })}
         </div>
+
+        {/* Playhead — same container as bars, so left% aligns with color boundary */}
+        {duration > 0 && (
+          <div
+            className="absolute top-0 bottom-0 w-[2px] z-[2]"
+            style={{
+              left: `${playheadPct}%`,
+              backgroundColor: "rgba(255,255,255,0.9)",
+              boxShadow: "0 0 4px rgba(255,255,255,0.2)",
+              transform: "translateX(-1px)",
+              transition: "left 100ms linear",
+            }}
+          />
+        )}
       </div>
 
-      {/* CENTER — static playhead line */}
-      <div className="absolute top-0 bottom-0 w-px bg-white/50 left-1/2 z-[2]" />
-
-      {/* RIGHT HALF — blank (no rendering) */}
-
-      {/* CENTERED TRANSPORT CONTROLS — completely stationary */}
-      <div className="absolute inset-0 flex items-center justify-center z-[10] pointer-events-none">
-        <div className="flex items-center gap-3 pointer-events-auto">
-          <motion.button
-            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-              isShuffle ? "text-accent" : "text-white/35 hover:text-white"
-            }`}
-            onClick={toggleShuffle}
-            whileTap={{ scale: 0.85 }}
-            aria-label="Shuffle"
-          >
-            <Shuffle size={13} />
-          </motion.button>
-
-          <motion.button
-            className="w-9 h-9 rounded-full flex items-center justify-center text-white/50 hover:text-white transition-colors"
-            onClick={playPrev}
-            whileTap={{ scale: 0.85 }}
-            aria-label="Previous"
-          >
-            <SkipBack size={16} fill="currentColor" />
-          </motion.button>
-
-          <motion.button
-            className="w-11 h-11 rounded-full bg-white flex items-center justify-center text-bg shadow-[0_0_24px_rgba(255,255,255,0.15)]"
-            onClick={togglePlayPause}
-            whileTap={{ scale: 0.9 }}
-          >
-            {isPlaying && !isPaused ? (
-              <div className="flex items-center gap-[3px]">
-                <div className="w-[3px] h-[14px] bg-bg rounded-sm" />
-                <div className="w-[3px] h-[14px] bg-bg rounded-sm" />
-              </div>
-            ) : (
-              <div className="w-0 h-0 border-t-[7px] border-t-transparent border-b-[7px] border-b-transparent border-l-[12px] border-l-bg ml-0.5" />
-            )}
-          </motion.button>
-
-          <motion.button
-            className="w-9 h-9 rounded-full flex items-center justify-center text-white/50 hover:text-white transition-colors"
-            onClick={playNext}
-            whileTap={{ scale: 0.85 }}
-            aria-label="Next"
-          >
-            <SkipForward size={16} fill="currentColor" />
-          </motion.button>
-
-          <motion.button
-            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-              repeatMode !== "off"
-                ? "text-accent"
-                : "text-white/35 hover:text-white"
-            }`}
-            onClick={toggleRepeat}
-            whileTap={{ scale: 0.85 }}
-            aria-label="Repeat"
-          >
-            <Repeat size={13} />
-            {repeatMode === "one" && (
-              <span className="absolute text-[6px] font-bold text-accent">
-                1
-              </span>
-            )}
-          </motion.button>
-        </div>
+      {/* Time labels */}
+      <div
+        className="flex justify-between text-[10px] tabular-nums pointer-events-none z-[5]"
+        style={{ color: "rgba(255,255,255,0.4)" }}
+      >
+        <span>{formatTime(elapsed)}</span>
+        <span style={{ marginLeft: "auto" }}>-{formatTime(Math.max(0, duration - elapsed))}</span>
       </div>
 
-      {/* TIME LABELS */}
-      <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[11px] text-white/35 tabular-nums px-1 pointer-events-none z-[5]">
-        <span>{formatDuration(elapsed)}</span>
-        <span>{formatDuration(duration)}</span>
+      {/* Transport controls */}
+      <div className="flex items-center justify-center gap-4 z-[10]">
+        <button
+          onClick={toggleShuffle}
+          className={`transition-colors ${isShuffle ? "text-white" : "text-[rgba(255,255,255,0.4)] hover:text-white"}`}
+          aria-label="Shuffle"
+        >
+          <Shuffle size={16} />
+        </button>
+        <button
+          onClick={playPrev}
+          className="text-[rgba(255,255,255,0.5)] hover:text-white transition-colors"
+          aria-label="Previous"
+        >
+          <SkipBack size={18} />
+        </button>
+        <button
+          onClick={togglePlayPause}
+          className="w-9 h-9 flex items-center justify-center rounded-full text-white hover:bg-[rgba(255,255,255,0.1)] transition-colors"
+          aria-label={isPlaying && !isPaused ? "Pause" : "Play"}
+        >
+          {isPlaying && !isPaused ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+              <rect x="6" y="4" width="4" height="16" />
+              <rect x="14" y="4" width="4" height="16" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+              <polygon points="5,3 19,12 5,21" />
+            </svg>
+          )}
+        </button>
+        <button
+          onClick={playNext}
+          className="text-[rgba(255,255,255,0.5)] hover:text-white transition-colors"
+          aria-label="Next"
+        >
+          <SkipForward size={18} />
+        </button>
+        <button
+          onClick={toggleRepeat}
+          className={`relative transition-colors ${repeatMode !== "off" ? "text-white" : "text-[rgba(255,255,255,0.4)] hover:text-white"}`}
+          aria-label="Repeat"
+        >
+          {repeatMode === "one" ? <Repeat1 size={16} /> : <Repeat size={16} />}
+          {repeatMode === "one" && (
+            <span className="absolute -top-1 -right-1 text-[8px] font-bold text-white leading-none">1</span>
+          )}
+        </button>
       </div>
     </div>
   );
+}
+
+function formatTime(s: number): string {
+  if (!s || !isFinite(s)) return "0:00";
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, "0")}`;
 }

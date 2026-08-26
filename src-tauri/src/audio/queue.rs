@@ -28,7 +28,7 @@ impl SampleQueue {
 	}
 
 	pub fn push_all(&self, samples: &[f32]) -> bool {
-		let mut state = self.state.lock().unwrap();
+		let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 		let mut offset = 0;
 		loop {
 			if state.closed {
@@ -45,16 +45,16 @@ impl SampleQueue {
 			if offset >= samples.len() {
 				return true;
 			}
-			let (guard, _timeout) = self
-				.not_full
-				.wait_timeout(state, Duration::from_millis(100))
-				.unwrap();
+		let (guard, _timeout) = self
+			.not_full
+			.wait_timeout(state, Duration::from_millis(100))
+			.unwrap_or_else(|e| e.into_inner());
 			state = guard;
 		}
 	}
 
 	pub fn pop_available(&self, out: &mut [f32]) -> usize {
-		let mut state = self.state.lock().unwrap();
+		let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 		let written = state.data.len().min(out.len());
 		for slot in out.iter_mut().take(written) {
 			*slot = state.data.pop_front().unwrap();
@@ -66,17 +66,17 @@ impl SampleQueue {
 	}
 
 	pub fn is_empty(&self) -> bool {
-		self.state.lock().unwrap().data.is_empty()
+		self.state.lock().unwrap_or_else(|e| e.into_inner()).data.is_empty()
 	}
 
 	pub fn clear(&self) {
-		let mut state = self.state.lock().unwrap();
+		let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 		state.data.clear();
 		self.not_full.notify_all();
 	}
 
 	pub fn close(&self) {
-		let mut state = self.state.lock().unwrap();
+		let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 		state.closed = true;
 		self.not_full.notify_all();
 		self.not_empty.notify_all();

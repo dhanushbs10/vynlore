@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { motion } from "framer-motion";
 import { hasCover } from "../../utils/format";
 import type { Track } from "../../types";
 
@@ -46,7 +45,7 @@ export function GenresView({ tracks, onGenreClick }: GenresViewProps) {
 
   if (genres.length === 0) {
     return (
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+      <div>
         <div className="mb-6">
           <h1 className="font-display text-2xl font-bold text-text tracking-tight">Genres</h1>
           <p className="text-sm text-text-secondary mt-1">No genres found</p>
@@ -54,49 +53,42 @@ export function GenresView({ tracks, onGenreClick }: GenresViewProps) {
         <div className="text-center py-16 text-text-muted">
           <div className="text-sm text-text-secondary">No tracks have genre metadata. Add music with genre tags to see them here.</div>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+    <div>
       <div className="mb-6">
         <h1 className="font-display text-2xl font-bold text-text tracking-tight">Genres</h1>
         <p className="text-sm text-text-secondary mt-1">{genres.length} genres</p>
       </div>
 
-      <motion.div
-        className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4"
-        variants={{ show: { transition: { staggerChildren: 0.03 } } }}
-        initial="hidden"
-        animate="show"
-      >
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
         {genres.map((genre) => {
           const coverSrc = genreCovers[genre];
           return (
-            <motion.div
+            <div
               key={genre}
-              variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
-              whileHover={{ y: -3, transition: { type: "spring", stiffness: 400, damping: 25 } }}
-              className="flex flex-col items-center gap-3 p-4 rounded-xl cursor-pointer group"
+              className="flex flex-col items-center gap-3 p-4 rounded-lg cursor-pointer group"
               onClick={() => onGenreClick(genre)}
             >
               {coverSrc ? (
                 <img
-                  className="w-[100px] h-[100px] rounded-xl object-cover shadow-lg group-hover:shadow-xl transition-shadow"
+                  className="w-[100px] h-[100px] rounded-md object-cover"
                   src={coverSrc}
                   alt={genre}
                 />
               ) : (
-                <div className="w-[100px] h-[100px] rounded-xl bg-bg-surface flex items-center justify-center text-2xl font-bold text-text-muted">
+                <div className="w-[100px] h-[100px] rounded-md bg-bg-surface flex items-center justify-center text-2xl font-bold text-text-muted">
                   {genre.charAt(0).toUpperCase()}
                 </div>
               )}
               <div className="text-sm font-medium text-text text-center">{genre}</div>
-            </motion.div>
+            </div>
           );
         })}
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

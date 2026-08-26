@@ -10,9 +10,11 @@ export interface Track {
   channels: number;
   duration_secs: number;
   track_number: number;
+  disc_number: number;
   cover_path?: string | null;
   lyrics?: string | null;
   format: string;
+  play_count: number;
 }
 
 export interface AudioDevice {

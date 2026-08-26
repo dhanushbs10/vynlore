@@ -20,7 +20,7 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::Media::KernelStreaming::WAVE_FORMAT_EXTENSIBLE;
 use windows::Win32::System::Com::{
-	CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
+	CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
 
 use crate::audio::player::ControlBlock;
@@ -133,6 +133,7 @@ pub fn open_exclusive(
 	let stop_flag = Arc::new(AtomicBool::new(false));
 
 	let session = unsafe { acquire_session(device_index, fmt)? };
+	unsafe { CoUninitialize(); }
 
 	let thread_stop = stop_flag.clone();
 	let job = RenderJob {
@@ -266,6 +267,7 @@ pub fn probe_exclusive(device_index: Option<usize>, fmt: TargetFormat) -> Result
 				fmt.sample_rate, fmt.channels, fmt.valid_bits, hr.0 as u32
 			));
 		}
+		CoUninitialize();
 		Ok(())
 	}
 }
@@ -339,8 +341,8 @@ unsafe fn write_samples(
 	let ch = fmt.channels as usize;
 	let vol = f32::from_bits(volume_bits.load(Ordering::Relaxed));
 	let bal = f32::from_bits(balance_bits.load(Ordering::Relaxed));
-	let left_gain = if bal <= -0.01 { 1.0 + bal } else if bal > 0.01 { 1.0 - bal } else { 1.0 };
-	let right_gain = if bal > 0.01 { 1.0 } else if bal < -0.01 { 1.0 + bal } else { 1.0 };
+	let left_gain = if bal > 0.01 { 1.0 - bal } else { 1.0 };
+	let right_gain = if bal < -0.01 { 1.0 + bal } else { 1.0 };
 	let passthrough = (vol - 1.0).abs() < 1e-6 && (bal).abs() < 0.01;
 	let data_ptr = render.GetBuffer(frames as u32).map_err(|e| format!("GetBuffer: {}", e))?;
 
@@ -424,6 +426,7 @@ unsafe fn run_render_loop(
 	let ch = fmt.channels as usize;
 	let container_bits: u16 = if fmt.valid_bits <= 16 { 16 } else { 32 };
 	let container_bytes = (container_bits / 8) as usize;
+	spectrum.set_channels(ch);
 	let diag = std::env::var("VYNLORE_EXCL_DIAG").map(|v| v != "0").unwrap_or(false);
 	let mut scratch: Vec<f32> = vec![0.0f32; buffer_frames as usize * ch];
 
@@ -480,10 +483,16 @@ unsafe fn run_render_loop(
 		let paused = control.paused.load(Ordering::Relaxed);
 		if paused != was_paused {
 			if paused {
-				let _ = client.Stop();
-				let _ = client.Reset();
+				if let Err(e) = client.Stop() {
+					eprintln!("exclusive pause: Stop() failed: {}", e);
+				}
+				if let Err(e) = client.Reset() {
+					eprintln!("exclusive pause: Reset() failed: {}", e);
+				}
 			} else {
-				let _ = client.Start();
+				if let Err(e) = client.Start() {
+					eprintln!("exclusive unpause: Start() failed: {}", e);
+				}
 			}
 			was_paused = paused;
 		}
@@ -520,7 +529,22 @@ unsafe fn run_render_loop(
 				balance_bits,
 				true,
 			)?;
+			// Push raw (pre-volume) samples to spectrum so the visualizer
+			// isn't double-gained by the volume/balance adjustment below.
 			spectrum.push_samples(&scratch[..frames_written * ch]);
+			let vol = f32::from_bits(volume_bits.load(Ordering::Relaxed));
+			let bal = f32::from_bits(balance_bits.load(Ordering::Relaxed));
+			let lg = if bal > 0.01 { 1.0 - bal } else { 1.0 };
+			let rg = if bal < -0.01 { 1.0 + bal } else { 1.0 };
+			for chunk in scratch[..frames_written * ch].chunks_exact_mut(ch) {
+				chunk[0] *= lg * vol;
+				if ch >= 2 {
+					chunk[1] *= rg * vol;
+				}
+				for s in chunk[2..].iter_mut() {
+					*s *= vol;
+				}
+			}
 			written_total += frames_written as u64;
 		}
 
@@ -540,6 +564,7 @@ unsafe fn run_render_loop(
 	}
 
 	let _ = client.Stop();
+	CoUninitialize();
 	Ok(())
 }
 

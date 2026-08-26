@@ -25,9 +25,9 @@ pub struct LibraryDb {
   pub conn: Connection,
 }
 
-/// Shared 14-field track row: (id, file_path, title, artist, album, genre,
-/// sample_rate, bit_depth, channels, duration_secs, track_number, cover_path,
-/// lyrics, format).
+/// Shared 16-field track row: (id, file_path, title, artist, album, genre,
+/// sample_rate, bit_depth, channels, duration_secs, track_number, disc_number,
+/// cover_path, lyrics, format, play_count).
 pub type TrackRow = (
   i64,
   String,
@@ -40,9 +40,11 @@ pub type TrackRow = (
   u8,
   f64,
   i64,
+  i64,
   Option<String>,
   Option<String>,
   String,
+  i64,
 );
 
 fn map_track_row(
@@ -60,9 +62,11 @@ fn map_track_row(
     row.get::<_, i64>(8)? as u8,
     row.get(9)?,
     row.get(10)?,
-    if row.get::<_, String>(11)?.is_empty() { None } else { Some(row.get(11)?) },
+    row.get(11)?,
     if row.get::<_, String>(12)?.is_empty() { None } else { Some(row.get(12)?) },
-    row.get(13)?,
+    if row.get::<_, String>(13)?.is_empty() { None } else { Some(row.get(13)?) },
+    row.get(14)?,
+    row.get(15)?,
   ))
 }
 
@@ -89,25 +93,42 @@ impl LibraryDb {
         lyrics TEXT
       );",
     )?;
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN cover_path TEXT", []);
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN lyrics TEXT", []);
-    let _ = conn.execute(
+    if let Err(e) = conn.execute("ALTER TABLE tracks ADD COLUMN cover_path TEXT", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE tracks ADD COLUMN lyrics TEXT", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute(
       "ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0",
       [],
-    );
-    let _ = conn.execute("ALTER TABLE tracks ADD COLUMN last_played INTEGER", []);
-    let _ = conn.execute(
+    ) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE tracks ADD COLUMN last_played INTEGER", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute(
       "ALTER TABLE tracks ADD COLUMN format TEXT NOT NULL DEFAULT ''",
       [],
-    );
-    let _ = conn.execute_batch(
+    ) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE tracks ADD COLUMN waveform BLOB", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute_batch(
       "CREATE INDEX IF NOT EXISTS idx_tracks_last_played ON tracks(last_played);",
-    );
+    ) {
+      eprintln!("[db] migration warning: {}", e);
+    }
 
-    let _ = conn.execute_batch("DELETE FROM playlist_tracks WHERE rowid NOT IN (
+    if let Err(e) = conn.execute_batch("DELETE FROM playlist_tracks WHERE rowid NOT IN (
       SELECT MIN(rowid) FROM playlist_tracks GROUP BY playlist_id, track_id
-    );");
-    let _ = conn.execute_batch(
+    );") {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute_batch(
       "CREATE UNIQUE INDEX IF NOT EXISTS uq_playlist_track
        ON playlist_tracks(playlist_id, track_id);
        CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos
@@ -115,7 +136,9 @@ impl LibraryDb {
        CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
        CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
        CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre);",
-    );
+    ) {
+      eprintln!("[db] migration warning: {}", e);
+    }
 
     conn.execute_batch(
       "CREATE TABLE IF NOT EXISTS playlists (
@@ -124,6 +147,12 @@ impl LibraryDb {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );",
     )?;
+    if let Err(e) = conn.execute("ALTER TABLE playlists ADD COLUMN cover_path TEXT", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE playlists ADD COLUMN color TEXT", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
     conn.execute_batch(
       "CREATE TABLE IF NOT EXISTS playlist_tracks (
         playlist_id INTEGER,
@@ -186,9 +215,11 @@ impl LibraryDb {
     };
     let mut removed = 0;
     for p in &paths {
-      if std::fs::metadata(p).is_err() {
-        self.conn.execute("DELETE FROM tracks WHERE file_path = ?1", [p])?;
-        removed += 1;
+      if let Err(e) = std::fs::metadata(p) {
+        if e.kind() == std::io::ErrorKind::NotFound {
+          self.conn.execute("DELETE FROM tracks WHERE file_path = ?1", [p])?;
+          removed += 1;
+        }
       }
     }
     Ok(removed)
@@ -199,12 +230,74 @@ impl LibraryDb {
     Ok(self.conn.last_insert_rowid())
   }
 
-  pub fn get_playlists(&self) -> Result<Vec<(i64, String, i64)>> {
+  pub fn rename_playlist(&self, playlist_id: i64, name: &str) -> Result<()> {
+    self.conn.execute("UPDATE playlists SET name = ?1 WHERE id = ?2", [name, &playlist_id.to_string()])?;
+    Ok(())
+  }
+
+  pub fn set_playlist_cover(&self, playlist_id: i64, cover_path: &str) -> Result<()> {
+    self.conn.execute("UPDATE playlists SET cover_path = ?1 WHERE id = ?2", [cover_path, &playlist_id.to_string()])?;
+    Ok(())
+  }
+
+  pub fn get_playlist_cover(&self, playlist_id: i64) -> Result<Option<String>> {
+    let result = self.conn.query_row(
+      "SELECT cover_path FROM playlists WHERE id = ?1",
+      [playlist_id],
+      |row| row.get::<_, Option<String>>(0),
+    );
+    match result {
+      Ok(path) => Ok(path),
+      Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+      Err(e) => Err(e),
+    }
+  }
+
+  pub fn set_playlist_color(&self, playlist_id: i64, color: &str) -> Result<()> {
+    self.conn.execute("UPDATE playlists SET color = ?1 WHERE id = ?2", [color, &playlist_id.to_string()])?;
+    Ok(())
+  }
+
+  pub fn get_playlist_color(&self, playlist_id: i64) -> Result<Option<String>> {
+    let result = self.conn.query_row(
+      "SELECT color FROM playlists WHERE id = ?1",
+      [playlist_id],
+      |row| row.get::<_, Option<String>>(0),
+    );
+    match result {
+      Ok(color) => Ok(color),
+      Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+      Err(e) => Err(e),
+    }
+  }
+
+  /// If the playlist has no cover, set it to a random track's cover.
+  pub fn auto_set_cover_from_first_track(&self, playlist_id: i64) -> Result<()> {
+    let current: Option<String> = self.conn.query_row(
+      "SELECT cover_path FROM playlists WHERE id = ?1",
+      [playlist_id],
+      |row| row.get(0),
+    )?;
+    if current.is_some_and(|c| !c.is_empty()) {
+      return Ok(());
+    }
+    let first_cover: Option<String> = self.conn.query_row(
+      "SELECT t.cover_path FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id WHERE pt.playlist_id = ?1 AND t.cover_path IS NOT NULL AND t.cover_path != '' ORDER BY RANDOM() LIMIT 1",
+      [playlist_id],
+      |row| row.get(0),
+    )?;
+    if let Some(cover) = first_cover.filter(|c| !c.is_empty()) {
+      self.conn.execute("UPDATE playlists SET cover_path = ?1 WHERE id = ?2", [&cover, &playlist_id.to_string()])?;
+    }
+    Ok(())
+  }
+
+  pub fn get_playlists(&self) -> Result<Vec<(i64, String, i64, Option<String>, Option<String>)>> {
     let mut stmt = self.conn.prepare(
-      "SELECT p.id, p.name, COUNT(pt.track_id) FROM playlists p LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id GROUP BY p.id ORDER BY p.created_at DESC",
+      "SELECT p.id, p.name, COUNT(pt.track_id), p.cover_path, p.color FROM playlists p LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id GROUP BY p.id ORDER BY p.created_at DESC",
     )?;
     let iter = stmt.query_map([], |row| {
-      Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+      Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?))
     })?;
     let mut out = Vec::new();
     for row in iter {
@@ -236,6 +329,7 @@ impl LibraryDb {
       "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
       [playlist_id, track_id, pos],
     )?;
+    let _ = self.auto_set_cover_from_first_track(playlist_id);
     Ok(())
   }
 
@@ -255,8 +349,8 @@ impl LibraryDb {
     let mut stmt = self.conn.prepare(
       "SELECT t.id, t.file_path, t.title, t.artist, t.album, t.genre,
               t.sample_rate, t.bit_depth, t.channels, t.duration_secs,
-              COALESCE(t.track_number, 0), COALESCE(t.cover_path,''), COALESCE(t.lyrics,''),
-              COALESCE(NULLIF(t.format,''), 'FLAC')
+              COALESCE(t.track_number, 0), COALESCE(t.disc_number, 0), COALESCE(t.cover_path,''), COALESCE(t.lyrics,''),
+              COALESCE(NULLIF(t.format,''), 'FLAC'), COALESCE(t.play_count, 0)
        FROM playlist_tracks pt
        JOIN tracks t ON t.id = pt.track_id
        WHERE pt.playlist_id = ?1
@@ -288,8 +382,8 @@ impl LibraryDb {
     let mut stmt = self.conn.prepare(
       "SELECT t.id, t.file_path, t.title, t.artist, t.album, t.genre,
               t.sample_rate, t.bit_depth, t.channels, t.duration_secs,
-              COALESCE(t.track_number, 0), COALESCE(t.cover_path,''), COALESCE(t.lyrics,''),
-              COALESCE(NULLIF(t.format,''), 'FLAC')
+              COALESCE(t.track_number, 0), COALESCE(t.disc_number, 0), COALESCE(t.cover_path,''), COALESCE(t.lyrics,''),
+              COALESCE(NULLIF(t.format,''), 'FLAC'), COALESCE(t.play_count, 0)
        FROM tracks t
        WHERE t.last_played IS NOT NULL
        ORDER BY t.last_played DESC
@@ -350,6 +444,43 @@ impl LibraryDb {
       .execute("DELETE FROM playlist_tracks WHERE playlist_id = ?1", [playlist_id])?;
     self.conn
       .execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])?;
+    Ok(())
+  }
+
+  /// Returns the cached waveform peak data for a track, or None if not yet
+  /// computed or if the blob is from an older extraction algorithm (no version
+  /// prefix).  The blob format is: 1 version byte (must match
+  /// WAVEFORM_CACHE_VERSION) followed by raw little-endian f32 array (400 points).
+  pub fn get_waveform(&self, file_path: &str) -> Result<Option<Vec<f32>>> {
+    let blob: Option<Vec<u8>> = self.conn.query_row(
+      "SELECT waveform FROM tracks WHERE file_path = ?1",
+      [file_path],
+      |row| row.get(0),
+    )?;
+    match blob {
+      Some(bytes) if bytes.len() >= 5 && bytes[0] == crate::decoder::waveform::WAVEFORM_CACHE_VERSION => {
+        let floats: Vec<f32> = bytes[1..]
+          .chunks_exact(4)
+          .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+          .collect();
+        Ok(Some(floats))
+      }
+      _ => Ok(None),
+    }
+  }
+
+  /// Stores the computed waveform peak data for a track, prefixed with the
+  /// cache version byte so stale blobs are detected on read.
+  pub fn set_waveform(&self, file_path: &str, peaks: &[f32]) -> Result<()> {
+    let mut bytes = Vec::with_capacity(1 + peaks.len() * 4);
+    bytes.push(crate::decoder::waveform::WAVEFORM_CACHE_VERSION);
+    for p in peaks {
+      bytes.extend_from_slice(&p.to_le_bytes());
+    }
+    self.conn.execute(
+      "UPDATE tracks SET waveform = ?1 WHERE file_path = ?2",
+      rusqlite::params![bytes, file_path],
+    )?;
     Ok(())
   }
 }

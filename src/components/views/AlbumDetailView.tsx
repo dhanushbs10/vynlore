@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { ArrowLeft, Play } from "lucide-react";
+import { ArrowLeft, Play, Repeat, Repeat1 } from "lucide-react";
 import { motion } from "framer-motion";
 import { usePlayer } from "../../context/PlayerContext";
 import { formatDuration, hasCover } from "../../utils/format";
@@ -14,7 +14,7 @@ interface AlbumDetailViewProps {
 }
 
 export function AlbumDetailView({ albumName, tracks, playTrack, onBack }: AlbumDetailViewProps) {
-  const { currentTrack } = usePlayer();
+  const { currentTrack, repeatMode, toggleRepeat } = usePlayer();
 
   const albumTracks = useMemo(() => {
     const filtered = tracks.filter((t) => t.album === albumName);
@@ -27,11 +27,12 @@ export function AlbumDetailView({ albumName, tracks, playTrack, onBack }: AlbumD
     return filtered;
   }, [tracks, albumName]);
 
-  const coverSrc = hasCover(albumTracks[0])
-    ? convertFileSrc(albumTracks[0].cover_path!)
+  const firstTrack = albumTracks[0];
+  const coverSrc = firstTrack && hasCover(firstTrack)
+    ? convertFileSrc(firstTrack.cover_path!)
     : undefined;
 
-  const artist = albumTracks[0]?.artist || "Unknown Artist";
+  const artist = firstTrack?.artist || "Unknown Artist";
 
   const handlePlayAlbum = async () => {
     if (albumTracks.length === 0) return;
@@ -58,10 +59,10 @@ export function AlbumDetailView({ albumName, tracks, playTrack, onBack }: AlbumD
             <img
               src={coverSrc}
               alt={albumName}
-              className="w-[220px] h-[220px] rounded-xl object-cover shadow-[0_16px_48px_rgba(0,0,0,0.45)]"
+              className="w-[220px] h-[220px] rounded-md object-cover"
             />
           ) : (
-            <div className="w-[220px] h-[220px] rounded-xl bg-gradient-to-br from-bg-elevated to-bg-surface shadow-[0_16px_48px_rgba(0,0,0,0.45)]" />
+            <div className="w-[220px] h-[220px] rounded-md bg-bg-surface" />
           )}
         </div>
 
@@ -69,13 +70,20 @@ export function AlbumDetailView({ albumName, tracks, playTrack, onBack }: AlbumD
           <div className="text-[22px] font-bold text-text mb-1">{albumName}</div>
           <div className="text-sm text-text-secondary mb-4.5">{artist}</div>
           <motion.button
-            className="w-11 h-11 rounded-full bg-accent text-bg flex items-center justify-center shadow-[0_0_20px_var(--color-accent-glow)] hover:scale-105 active:scale-95 transition-transform"
+            className="w-11 h-11 rounded-full bg-white text-black flex items-center justify-center transition-transform"
             onClick={handlePlayAlbum}
             whileTap={{ scale: 0.95 }}
             aria-label="Play album"
           >
             <Play size={18} fill="currentColor" />
           </motion.button>
+          <button
+            className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border-none bg-transparent p-0 cursor-pointer transition-colors ${repeatMode === "off" ? "text-text-muted" : "text-white"}`}
+            aria-label="Repeat"
+            onClick={toggleRepeat}
+          >
+            {repeatMode === "one" ? <Repeat1 size={15} /> : <Repeat size={15} />}
+          </button>
         </div>
       </div>
 
@@ -97,7 +105,7 @@ export function AlbumDetailView({ albumName, tracks, playTrack, onBack }: AlbumD
             return (
               <div
                 key={track.id}
-                className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer hover:bg-bg-hover transition-colors ${active ? "bg-accent-soft" : ""}`}
+                className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${active ? "bg-white/5" : ""}`}
                 onClick={() => {
                   playTrack(track, albumTracks);
                 }}

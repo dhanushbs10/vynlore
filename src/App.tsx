@@ -21,11 +21,11 @@ import { HomeView } from "./components/views/HomeView";
 import PlayerBar from "./components/PlayerBar";
 import { SearchPalette } from "./components/SearchPalette";
 import { Toast } from "./components/Toast";
-import type { Track, ToastMessage } from "./types";
+import type { Track, ToastMessage, AudioDevice } from "./types";
 
 export type { Track };
 
-type View = "now" | "browse" | "albums" | "artists" | "playlists" | "playlist-detail" | "genres" | "genre-detail" | "album-detail" | "artist-detail";
+export type View = "now" | "browse" | "albums" | "artists" | "playlists" | "playlist-detail" | "genres" | "genre-detail" | "album-detail" | "artist-detail";
 
 type WatcherPayload = { title: string; artist: string; count: number };
 
@@ -43,6 +43,7 @@ function AppInner() {
   const [tauriReady, setTauriReady] = useState(isTauri());
   const [watchedFolder, setWatchedFolder] = useState<string | null>(null);
   const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
+  const [devices, setDevices] = useState<AudioDevice[]>([]);
   const {
     currentTrackIndex,
     currentTrack,
@@ -56,6 +57,8 @@ function AppInner() {
     playNext,
     playPrev,
     currentTime,
+    selectedDevice,
+    setSelectedDevice,
   } = usePlayer();
 
   const currentTimeRef = useRef(currentTime);
@@ -80,10 +83,10 @@ function AppInner() {
       if (e.code === "Space") {
         e.preventDefault();
         void togglePlayPause();
-      } else if (e.key === "ArrowRight" && e.ctrlKey) {
+      } else if (e.key === "ArrowRight" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         void playNext();
-      } else if (e.key === "ArrowLeft" && e.ctrlKey) {
+      } else if (e.key === "ArrowLeft" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         void playPrev();
       } else if (e.key === "ArrowRight") {
@@ -119,6 +122,9 @@ function AppInner() {
           if (folder) setWatchedFolder(folder);
         })
         .catch((err) => console.error("failed to read watched folder", err));
+      invoke<AudioDevice[]>("list_devices")
+        .then((d) => setDevices(d))
+        .catch(() => {});
     }
   }, [tauriReady, loadTracks]);
 
@@ -196,17 +202,41 @@ function AppInner() {
     }
   }, []);
 
-  const handleBackToPlaylist = useCallback(() => setSelectedPlaylist(null), []);
+  const handleRescan = useCallback(async () => {
+    if (!watchedFolder || scanning) return;
+    setScanning(true);
+    try {
+      await invoke("rescan_folder", { path: watchedFolder });
+    } catch (err) {
+      console.error("Rescan failed:", err);
+    } finally {
+      setScanning(false);
+    }
+  }, [watchedFolder, scanning]);
+
+  useEffect(() => {
+    if (!scanning) return;
+    const timer = setTimeout(() => setScanning(false), 120_000);
+    return () => clearTimeout(timer);
+  }, [scanning]);
+
+  const handleBackToPlaylist = useCallback(() => {
+    setSelectedPlaylist(null);
+    setCurrentView("playlists");
+  }, []);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const handleNav = useCallback(
-    (view: string) => {
-      setCurrentView(view as View);
+    (view: View) => {
+      setCurrentView(view);
       setSelectedAlbum(null);
       setSelectedArtist(null);
       setSelectedGenre(null);
       setSelectedPlaylist(null);
       setDisplayedTracks(libraryTracks);
       setShowFullNow(false);
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
     },
     [libraryTracks],
   );
@@ -250,8 +280,8 @@ function AppInner() {
     setShowFullNow(false);
   }, []);
 
-  const handleExpandTrack = useCallback((track: Track) => {
-    playTrack(track, libraryTracks);
+  const handleExpandTrack = useCallback((track: Track, queue?: Track[]) => {
+    playTrack(track, queue ?? libraryTracks);
     setShowFullNow(true);
   }, [playTrack, libraryTracks]);
 
@@ -259,15 +289,19 @@ function AppInner() {
     <div className="flex h-screen w-screen overflow-hidden bg-bg">
       <Sidebar
         onAddFolder={handleAddFolder}
+        onRescan={handleRescan}
         currentView={currentView}
         onNavClick={handleNav}
         scanning={scanning}
         hasFolder={!!watchedFolder}
         onOpenSearch={() => setShowSearch(true)}
         onToggleEq={() => setShowEq((v) => !v)}
+        devices={devices}
+        selectedDevice={selectedDevice}
+        onSelectDevice={setSelectedDevice}
       />
-      <main className="flex-1 flex flex-col min-w-0">
-        <div className="flex-1 overflow-y-auto p-8 pb-28">
+      <main className="flex-1 flex flex-col min-w-0 min-h-0">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-8 pb-24">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}

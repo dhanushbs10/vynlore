@@ -19,7 +19,11 @@ impl fmt::Display for AudioError {
     }
 }
 
-impl std::error::Error for AudioError {}
+impl std::error::Error for AudioError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
 
 impl From<std::io::Error> for AudioError {
     fn from(e: std::io::Error) -> Self {

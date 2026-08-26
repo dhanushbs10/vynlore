@@ -1,0 +1,295 @@
+================================================================================
+  VYNLORE AUDIO — PROJECT STRUCTURE & ARCHITECTURE GUIDE
+  Tauri v2 (Rust backend) + React/Vite (TypeScript frontend)
+================================================================================
+
+vynlore-audio/
+│
+├── .art-cache/                          # Cached artwork / generated assets
+│
+├── src-tauri/                           # ─── RUST BACKEND (Tauri v2) ──────────
+│   │
+│   ├── Cargo.toml                       # Rust dependencies (symphonia, cpal,
+│   │                                    #   rubato, serde, rusqlite, windows-rs, etc.)
+│   ├── build.rs                         # Tauri build script
+│   ├── tauri.conf.json                  # Tauri app config (window, permissions, icons)
+│   ├── library.db / library.db-*        # SQLite library database + WAL files
+│   │
+│   ├── capabilities/
+│   │   └── default.json                 # Tauri v2 capability/permission declarations
+│   │
+│   ├── gen/schemas/                     # Auto-generated Tauri schema files
+│   │
+│   ├── icons/                           # App icons
+│   │   └── icon.ico
+│   │
+│   └── src/                             # *** MAIN RUST SOURCE ***
+│       │
+│       ├── main.rs                      # App entry point: Tauri builder, state init,
+│       │                                #   spectrum thread spawn, media key registration,
+│       │                                #   startup library scan, watcher setup
+│       │
+│       ├── state.rs                     # AppState: holds Arc<Mutex<LibraryDb>>,
+│       │                                #   volume/balance/preamp (AtomicU32),
+│       │                                #   SharedEq, SpectrumAnalyzer, playback Mutex
+│       │
+│       ├── commands.rs                  # *** ALL TAURI COMMANDS (#[tauri::command]) ***
+│       │                                #   play_track, stop_playback, pause/resume,
+│       │                                #   seek, get_position, set_volume/balance/preamp,
+│       │                                #   update_eq, get_tracks, list_devices,
+│       │                                #   scan_folder, queue_next_track, playlists,
+│       │                                #   likes, recently_played, etc.
+│       │
+│       ├── error.rs                     # AudioError enum (io, config, output, decoding)
+│       │
+│       ├── audio/                       # *** AUDIO ENGINE ***
+│       │   ├── mod.rs                   # Module declarations
+│       │   │
+│       │   ├── player.rs               # CORE PLAYBACK ENGINE:
+│       │   │                           #   Pipeline (decoder -> resampler -> EQ -> preamp),
+│       │   │                           #   ControlBlock (pause/stop/seek/position atomics),
+│       │   │                           #   PlaybackHandle (queue + backend + control),
+│       │   │                           #   player::start() — opens file, probes exclusive,
+│       │   │                           #   spawns cpal/WASAPI output + decoder thread,
+│       │   │                           #   run_decoder() — main decode loop with gapless
+│       │   │                           #   chaining via try_chain() and boundary markers
+│       │   │
+│       │   ├── output.rs               # cpal shared-mode output: AudioOutput::start(),
+│       │   │                           #   find_best_config(), select_device_by_number()
+│       │   │
+│       │   ├── wasapi.rs               # Windows WASAPI exclusive-mode output:
+│       │   │                           #   open_exclusive(), probe_exclusive(),
+│       │   │                           #   run_render_loop() — prefill, polling loop,
+│       │   │                           #   write_samples() (f32->i16/i32 conversion,
+│       │   │                           #   volume/balance applied here),
+│       │   │                           #   run_diagnostic_sine() for --excl-test
+│       │   │
+│       │   ├── eq.rs                   # 10-band parametric EQ (RBJ biquad filters):
+│       │   │                           #   low-shelf (band 0), peaking (1-8),
+│       │   │                           #   high-shelf (band 9), process_interleaved(),
+│       │   │                           #   coefficient caching, EqSettings (SharedEq)
+│       │   │
+│       │   ├── spectrum.rs             # 64-bin FFT spectrum analyzer:
+│       │   │                           #   push_samples() from output callback,
+│       │   │                           #   compute() — snapshot, downmix, Hann window,
+│       │   │                           #   radix-2 FFT, 64-bin magnitude extraction,
+│       │   │                           #   emitted as "spectrum-data" Tauri event at ~30fps
+│       │   │
+│       │   ├── queue.rs                # Thread-safe sample queue (VecDeque + Condvar):
+│       │   │                           #   push_all() blocks when full, pop_available()
+│       │   │                           #   non-blocking, close() for shutdown
+│       │   │
+│       │   └── config.rs               # AudioConfig { sample_rate, channels }
+│       │                               #   -> cpal::StreamConfig conversion
+│       │
+│       ├── decoder/                     # *** AUDIO DECODING (Symphonia) ***
+│       │   ├── mod.rs                   # Module declarations
+│       │   └── audio.rs                 # open_audio() — Symphonia format probe + codec
+│       │                               #   init, decode_packet() — returns interleaved
+│       │                               #   f32 samples via SampleBuffer, seek() — accurate
+│       │                               #   seek with fractional seconds
+│       │
+│       └── library/                     # *** LIBRARY / DATABASE ***
+│           ├── mod.rs                   # Module declarations
+│           ├── db.rs                    # LibraryDb: SQLite via rusqlite — CRUD for
+│           │                           #   tracks, playlists, likes, play counts,
+│           │                           #   recently played, prune_missing_files()
+│           ├── scanner.rs              # scan_folder_with_progress(): walks directory,
+│           │                           #   reads metadata (symphonia), extracts cover
+│           │                           #   art, inserts into DB
+│           ├── metadata.rs             # Audio metadata extraction helpers
+│           └── watcher.rs              # Filesystem watcher (notify crate):
+│                                       #   start_watcher(), detects added/removed files,
+│                                       #   emits "watcher-event" to frontend
+│
+├── src/                                 # ─── REACT FRONTEND ──────────────────
+│   │
+│   ├── main.tsx                         # React entry point: renders <App />
+│   │
+│   ├── App.tsx                          # Root shell: sidebar + main content area
+│   │                                    #   + QueuePanel + EqPanel + PlayerBar
+│   │                                    #   + FullscreenNowPlaying + SearchPalette
+│   │                                    #   + Toast. Keyboard shortcuts (space/arrows)
+│   │                                    #   + watcher listener + recently-played loader
+│   │
+│   ├── index.css                        # Tailwind CSS v4 @theme tokens (colors,
+│   │                                    #   fonts), scrollbar styles, EQ vertical
+│   │                                    #   sliders, native range slider styles
+│   │
+│   ├── types.ts                         # Track, AudioDevice, ToastMessage, RepeatMode
+│   │
+│   ├── context/
+│   │   └── PlayerContext.tsx            # *** GLOBAL PLAYER STATE ***
+│   │                                   #   volume, currentTime, isPlaying/isPaused,
+│   │                                   #   currentTrack, queue, shuffle, repeat,
+│   │                                   #   EQ settings (enabled/gains/auto/preset),
+│   │                                   #   exclusive mode, balance, preamp
+│   │                                   #   playTrack(), togglePlayPause(), seekTime(),
+│   │                                   #   playNext/Prev(), toggleShuffle/Repeat(),
+│   │                                   #   localStorage persistence for all settings
+│   │                                   #   Tauri event listeners: playback-ended,
+│   │                                   #   track-changed, media-key
+│   │                                   #   Gapless sync: queue_next_track effect
+│   │
+│   ├── audio/
+│   │   └── eqPresets.ts               # 13 EQ presets (flat, rock, pop, jazz,
+│   │                                  #   classical, electronic, hip-hop, folk,
+│   │                                  #   metal, country, bass boost, treble boost,
+│   │                                  #   vocal) + genre-to-preset mapping
+│   │
+│   ├── components/
+│   │   │
+│   │   ├── PlayerBar.tsx              # *** BOTTOM PLAYER BAR ***
+│   │   │                              #   Progress bar (click-to-seek), cover art,
+│   │   │                              #   track info (title/artist/album), transport
+│   │   │                              #   controls (shuffle/prev/play/next/repeat),
+│   │   │                              #   exclusive mode toggle, format label,
+│   │   │                              #   time display, volume slider, like button,
+│   │   │                              #   add-to-playlist dropdown
+│   │   │                              #   + SpectrumBars visualization (background)
+│   │   │
+│   │   ├── WaveformSeekbar.tsx        # *** FULLSCREEN WAVEFORM VISUALIZATION ***
+│   │   │                              #   Scrolling RMS waveform bars (left half),
+│   │   │                              #   center playhead, transport controls overlaid,
+│   │   │                              #   click-to-seek, listens to "spectrum-data"
+│   │   │                              #   events, sprout animation (ease-out cubic)
+│   │   │
+│   │   ├── SpectrumBars.tsx           # 64-bar spectrum visualizer (also used in
+│   │   │                              #   PlayerBar background), temporal smoothing,
+│   │   │                              #   listens to "spectrum-data" events
+│   │   │
+│   │   ├── EqPanel.tsx                # 10-band EQ panel (slides up from bottom):
+│   │   │                              #   volume slider, preamp, balance (L/R),
+│   │   │                              #   10 faders, preset selector, auto-genre
+│   │   │                              #   toggle, frequency response curve (SVG)
+│   │   │
+│   │   ├── QueuePanel.tsx             # Right-side queue panel: track list,
+│   │   │                              #   current track highlight, drag reorder
+│   │   │
+│   │   ├── Sidebar.tsx                # Left sidebar: nav (Home/Browse/Albums/
+│   │   │                              #   Artists/Genres/Playlists), add folder,
+│   │   │                              #   EQ toggle, scanning indicator
+│   │   │
+│   │   ├── SearchPalette.tsx          # Ctrl+K search modal: fuzzy search across
+│   │   │                              #   tracks, results with play/artist/album/
+│   │   │                              #   genre actions
+│   │   │
+│   │   ├── Toast.tsx                  # Notification toast stack (auto-dismiss)
+│   │   │
+│   │   └── views/                     # *** PAGE VIEWS ***
+│   │       ├── HomeView.tsx           #   Home: recently played, quick picks
+│   │       ├── TracksView.tsx         #   Browse: all tracks table
+│   │       ├── AlbumsView.tsx         #   Albums grid
+│   │       ├── AlbumDetailView.tsx    #   Album detail: tracks in album
+│   │       ├── ArtistsView.tsx        #   Artists grid
+│   │       ├── ArtistDetailView.tsx   #   Artist detail: albums + tracks
+│   │       ├── GenresView.tsx         #   Genres grid
+│   │       ├── GenreDetailView.tsx    #   Genre detail: tracks in genre
+│   │       ├── PlaylistsView.tsx      #   Playlists list + create
+│   │       ├── PlaylistDetailView.tsx #   Playlist detail: tracks
+│   │       └── FullscreenNowPlaying.tsx  # *** FULLSCREEN NOW PLAYING ***
+│   │                                   #   Album art (large), track info,
+│   │                                   #   WaveformSeekbar, lyrics panel
+│   │                                   #   (LRC parse, auto-scroll, click-to-seek),
+│   │                                   #   EQ shortcut button
+│   │
+│   ├── utils/
+│   │   ├── format.ts                  # formatDuration(), formatSampleRate(),
+│   │   │                              #   hasCover()
+│   │   ├── shuffle.ts                 # Fisher-Yates shuffle utility
+│   │   └── artists.ts                # Artist name normalization
+│   │
+│   └── styles/                        # Legacy CSS (mostly migrated to Tailwind)
+│       ├── App.css
+│       ├── toast.css
+│       └── variables.css
+│
+├── index.html                         # Vite HTML entry point
+├── vite.config.ts                     # Vite config (Tauri plugin)
+├── tsconfig.json                      # TypeScript config
+├── tsconfig.node.json                 # TS config for node/build tooling
+├── package.json                       # NPM dependencies (React, framer-motion,
+│                                      #   lucide-react, @tauri-apps/*)
+├── package-lock.json
+├── build_export.cjs                   # Build/export utility scripts
+├── build_export.js
+├── fix-app.ts
+├── TECH_STACK.md                      # Tech stack documentation
+├── .gitignore
+└── library.db*                        # SQLite DB copies (dev artifact)
+
+
+================================================================================
+  ARCHITECTURE FLOW — HOW AUDIO PLAYBACK WORKS
+================================================================================
+
+  User clicks track
+       │
+       ▼
+  PlayerContext.playTrack()          ─── TS: sets state, calls Tauri commands
+       │
+       ├─► invoke("stop_playback")   ─── commands.rs: drops old PlaybackHandle
+       │
+       └─► invoke("play_track")      ─── commands.rs: play_track()
+            │
+            ▼
+         player::start()             ─── player.rs:
+            ├─ decoder::open_audio()       Opens file via Symphonia
+            ├─ probe_exclusive()           Tests WASAPI exclusive (Windows only)
+            ├─ setup_shared_output()       Falls back to cpal shared if needed
+            ├─ SampleQueue::new()          Creates thread-safe sample buffer
+            ├─ Pipeline::new()             Resampler + EQ + preamp state
+            ├─ Backend::Cpal/Wasapi        Opens audio output device
+            └─ spawn "vynlore-decode"      Decoder thread:
+                 │
+                 ▼
+              run_decoder()           ─── Loop: refill -> pump -> flush_tail
+                 │                         Gapless chaining via try_chain()
+                 ▼
+              Pipeline::pump()        ─── Apply preamp -> EQ -> push to queue
+                 │
+                 ▼
+              SampleQueue             ─── Thread-safe bridge (decoder <-> output)
+                 │
+                 ▼
+              cpal callback /         ─── Pop from queue -> apply volume/balance
+              WASAPI render loop           -> write to audio device
+                                           -> push to SpectrumAnalyzer
+                                              -> emitted as "spectrum-data" event
+                                                 -> WaveformSeekbar / SpectrumBars
+
+
+================================================================================
+  KEY FILES QUICK REFERENCE
+================================================================================
+
+  AUDIO ENGINE (Rust):
+    src-tauri/src/audio/player.rs     # Core playback: Pipeline, ControlBlock,
+                                      #   player::start(), run_decoder(), gapless
+    src-tauri/src/audio/wasapi.rs     # WASAPI exclusive mode (Windows)
+    src-tauri/src/audio/output.rs     # cpal shared mode
+    src-tauri/src/audio/eq.rs         # 10-band RBJ biquad EQ
+    src-tauri/src/audio/spectrum.rs   # 64-bin FFT analyzer
+    src-tauri/src/audio/queue.rs      # Thread-safe sample FIFO
+    src-tauri/src/decoder/audio.rs    # Symphonia decode (open, packet, seek)
+
+  TAURI COMMANDS (Rust -> TS bridge):
+    src-tauri/src/commands.rs         # All #[tauri::command] handlers
+    src-tauri/src/main.rs             # App setup, state init, command registration
+
+  PLAYER UI (React):
+    src/components/PlayerBar.tsx      # Bottom bar: progress, controls, volume
+    src/components/WaveformSeekbar.tsx # Fullscreen waveform + transport
+    src/components/SpectrumBars.tsx   # Spectrum visualization (64 bars)
+    src/components/EqPanel.tsx        # Equalizer panel
+    src/components/views/FullscreenNowPlaying.tsx # Fullscreen view (art + lyrics)
+
+  STATE MANAGEMENT (React):
+    src/context/PlayerContext.tsx      # All player state, actions, persistence
+    src/App.tsx                       # View routing, keyboard shortcuts
+    src/types.ts                      # Shared TypeScript types
+
+  LIBRARY (Rust):
+    src-tauri/src/library/db.rs       # SQLite CRUD (tracks, playlists, likes)
+    src-tauri/src/library/scanner.rs  # Directory scanning + metadata extraction
+    src-tauri/src/library/watcher.rs  # Live filesystem watching

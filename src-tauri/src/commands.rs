@@ -26,9 +26,11 @@ pub struct UiTrack {
   pub channels: u8,
   pub duration_secs: f64,
   pub track_number: i64,
+  pub disc_number: i64,
   pub cover_path: Option<String>,
   pub lyrics: Option<String>,
   pub format: String,
+  pub play_count: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -42,6 +44,8 @@ pub struct UiPlaylist {
   pub id: i64,
   pub name: String,
   pub track_count: i64,
+  pub cover_path: Option<String>,
+  pub color: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -162,7 +166,7 @@ pub fn rescan_folder(path: String, app: tauri::AppHandle, state: State<AppState>
 #[tauri::command]
 pub fn get_tracks(state: State<AppState>) -> Result<Vec<UiTrack>, String> {
   let db = state.db.lock().map_err(|e| e.to_string())?;
-  let mut stmt = db.conn.prepare("SELECT id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, COALESCE(track_number,0), COALESCE(cover_path,''), COALESCE(lyrics,''), COALESCE(NULLIF(format,''),'FLAC') FROM tracks ORDER BY id DESC").map_err(|e| e.to_string())?;
+  let mut stmt = db.conn.prepare("SELECT id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, COALESCE(track_number,0), COALESCE(disc_number,0), COALESCE(cover_path,''), COALESCE(lyrics,''), COALESCE(NULLIF(format,''), 'FLAC'), COALESCE(play_count,0) FROM tracks ORDER BY id DESC").map_err(|e| e.to_string())?;
   let track_iter = stmt.query_map([], |row| {
     Ok(UiTrack {
       id: row.get(0)?,
@@ -176,9 +180,11 @@ pub fn get_tracks(state: State<AppState>) -> Result<Vec<UiTrack>, String> {
       channels: row.get(8)?,
       duration_secs: row.get(9)?,
       track_number: row.get(10)?,
-      cover_path: if row.get::<_, String>(11)?.is_empty() { None } else { Some(row.get(11)?) },
-      lyrics: if row.get::<_, String>(12)?.is_empty() { None } else { Some(row.get(12)?) },
-      format: row.get(13)?,
+      disc_number: row.get(11)?,
+      cover_path: if row.get::<_, String>(12)?.is_empty() { None } else { Some(row.get(12)?) },
+      lyrics: if row.get::<_, String>(13)?.is_empty() { None } else { Some(row.get(13)?) },
+      format: row.get(14)?,
+      play_count: row.get(15)?,
     })
   }).map_err(|e| e.to_string())?;
 
@@ -229,8 +235,8 @@ pub fn set_balance(balance: f64, state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn set_preamp(preamp: f64, state: State<AppState>) -> Result<(), String> {
-  let clamped = preamp.clamp(0.0, 2.0) as f32;
-  state.preamp.store(clamped.max(0.001).to_bits(), Ordering::Relaxed);
+  let clamped = preamp.clamp(0.5, 2.0) as f32;
+  state.preamp.store(clamped.to_bits(), Ordering::Relaxed);
   Ok(())
 }
 
@@ -263,28 +269,32 @@ pub fn play_track(
     return Err("File not found".to_string());
   }
 
-  // Hold the lock for the entire take-start-store sequence to prevent
-  // two concurrent play_track calls from interleaving.
-  let mut guard = state.playback.lock().map_err(|e| e.to_string())?;
-  let old_handle = guard.take();
+  // Atomic take-start-store under the lock to prevent two concurrent
+  // play_track calls from interleaving. The old handle is dropped after
+  // releasing the lock so the 15ms Drop sleep doesn't block other commands.
+  let (handle, exclusive_active, old_handle);
+  {
+    let mut guard = state.playback.lock().map_err(|e| e.to_string())?;
+    old_handle = guard.take();
+    let result = player::start(
+      &path,
+      device_index,
+      exclusive.unwrap_or(false),
+      state.volume.clone(),
+      state.eq.clone(),
+      state.spectrum.clone(),
+      state.balance.clone(),
+      state.preamp.clone(),
+      app,
+      0.0,
+    );
+    let r = result?;
+    exclusive_active = r.1;
+    handle = r.0;
+    *guard = Some(handle);
+  }
+  // Old playback stopped outside the lock so other commands aren't blocked.
   drop(old_handle);
-
-  let (handle, exclusive_active) = player::start(
-    &path,
-    device_index,
-    exclusive.unwrap_or(false),
-    state.volume.clone(),
-    state.eq.clone(),
-    state.spectrum.clone(),
-    state.balance.clone(),
-    state.preamp.clone(),
-    app,
-    0.0,
-  )?;
-
-  *guard = Some(handle);
-  drop(guard);
-  *state.current_path.lock().map_err(|e| e.to_string())? = Some(path);
   Ok(exclusive_active)
 }
 
@@ -293,7 +303,6 @@ pub fn stop_playback(state: State<AppState>) -> Result<(), String> {
   if let Some(handle) = state.playback.lock().map_err(|e| e.to_string())?.take() {
     handle.request_stop();
   }
-  *state.current_path.lock().map_err(|e| e.to_string())? = None;
   Ok(())
 }
 
@@ -314,18 +323,48 @@ pub fn get_position(state: State<AppState>) -> Result<f64, String> {
 }
 
 #[tauri::command]
-pub fn update_eq(enabled: bool, gains: Vec<f32>, state: State<AppState>) -> Result<(), String> {
-  if gains.len() != crate::audio::eq::EQ_BAND_COUNT {
+pub fn update_eq(
+  enabled: bool,
+  gains: Vec<f32>,
+  parametric: Option<bool>,
+  qs: Option<Vec<f32>>,
+  band_hz: Option<Vec<f32>>,
+  bass_boost_db: Option<f64>,
+  treble_boost_db: Option<f64>,
+  state: State<AppState>,
+) -> Result<(), String> {
+  let band_count = gains.len();
+  if band_count < crate::audio::eq::MIN_BAND_COUNT || band_count > crate::audio::eq::MAX_BAND_COUNT {
     return Err(format!(
-      "expected {} EQ band gains, got {}",
-      crate::audio::eq::EQ_BAND_COUNT,
-      gains.len()
+      "expected {}-{} EQ bands, got {}",
+      crate::audio::eq::MIN_BAND_COUNT,
+      crate::audio::eq::MAX_BAND_COUNT,
+      band_count
     ));
   }
   let mut eq = state.eq.lock().map_err(|e| e.to_string())?;
   eq.enabled = enabled;
-  for (out, g) in eq.gains.iter_mut().zip(gains.iter()) {
-    *out = g.clamp(-crate::audio::eq::EQ_MAX_GAIN_DB, crate::audio::eq::EQ_MAX_GAIN_DB);
+  eq.gains = gains
+    .into_iter()
+    .map(|g| g.clamp(-crate::audio::eq::EQ_MAX_GAIN_DB, crate::audio::eq::EQ_MAX_GAIN_DB))
+    .collect();
+  if let Some(p) = parametric {
+    eq.parametric = p;
+  }
+  if let Some(q) = qs {
+    eq.qs = q
+      .into_iter()
+      .map(|v| v.clamp(0.3, 10.0))
+      .collect();
+  }
+  if let Some(hz) = band_hz {
+    eq.band_hz = hz;
+  }
+  if let Some(bass) = bass_boost_db {
+    eq.bass_boost_db = (bass as f32).clamp(-crate::audio::eq::EQ_MAX_BOOST_DB, crate::audio::eq::EQ_MAX_BOOST_DB);
+  }
+  if let Some(treble) = treble_boost_db {
+    eq.treble_boost_db = (treble as f32).clamp(-crate::audio::eq::EQ_MAX_BOOST_DB, crate::audio::eq::EQ_MAX_BOOST_DB);
   }
   Ok(())
 }
@@ -353,21 +392,8 @@ pub fn get_recently_played(limit: Option<u32>, state: State<AppState>) -> Result
     .map_err(|e| e.to_string())?;
   Ok(rows
     .into_iter()
-    .map(|(id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, track_number, cover_path, lyrics, format)| UiTrack {
-      id,
-      file_path,
-      title,
-      artist,
-      album,
-      genre,
-      sample_rate,
-      bit_depth,
-      channels,
-      duration_secs,
-      track_number,
-      cover_path,
-      lyrics,
-      format,
+    .map(|(id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, track_number, disc_number, cover_path, lyrics, format, play_count)| UiTrack {
+      id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, track_number, disc_number, cover_path, lyrics, format, play_count,
     })
     .collect())
 }
@@ -384,7 +410,7 @@ pub fn get_playlists(state: State<AppState>) -> Result<Vec<UiPlaylist>, String> 
   let rows = db.get_playlists().map_err(|e| e.to_string())?;
   Ok(rows
     .into_iter()
-    .map(|(id, name, track_count)| UiPlaylist { id, name, track_count: track_count as _ })
+    .map(|(id, name, track_count, cover_path, color)| UiPlaylist { id, name, track_count: track_count as _, cover_path, color })
     .collect())
 }
 
@@ -412,21 +438,8 @@ pub fn get_playlist_tracks(state: State<AppState>, playlist_id: i64) -> Result<V
   let rows = db.get_playlist_tracks(playlist_id).map_err(|e| e.to_string())?;
   Ok(rows
     .into_iter()
-    .map(|(id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, track_number, cover_path, lyrics, format)| UiTrack {
-      id,
-      file_path,
-      title,
-      artist,
-      album,
-      genre,
-      sample_rate,
-      bit_depth,
-      channels,
-      duration_secs,
-      track_number,
-      cover_path,
-      lyrics,
-      format,
+    .map(|(id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, track_number, disc_number, cover_path, lyrics, format, play_count)| UiTrack {
+      id, file_path, title, artist, album, genre, sample_rate, bit_depth, channels, duration_secs, track_number, disc_number, cover_path, lyrics, format, play_count,
     })
     .collect())
 }
@@ -451,4 +464,93 @@ pub fn is_track_liked(track_id: i64, state: State<AppState>) -> Result<bool, Str
 pub fn delete_playlist(playlist_id: i64, state: State<AppState>) -> Result<(), String> {
   let db = state.db.lock().map_err(|e| e.to_string())?;
   db.delete_playlist(playlist_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn rename_playlist(playlist_id: i64, name: String, state: State<AppState>) -> Result<(), String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  db.rename_playlist(playlist_id, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_playlist_cover(playlist_id: i64, cover_path: String, state: State<AppState>) -> Result<(), String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  db.set_playlist_cover(playlist_id, &cover_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_playlist_cover(playlist_id: i64, state: State<AppState>) -> Result<Option<String>, String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  db.get_playlist_cover(playlist_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_playlist_color(playlist_id: i64, color: String, state: State<AppState>) -> Result<(), String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  db.set_playlist_color(playlist_id, &color).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_playlist_color(playlist_id: i64, state: State<AppState>) -> Result<Option<String>, String> {
+  let db = state.db.lock().map_err(|e| e.to_string())?;
+  db.get_playlist_color(playlist_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_waveform(
+  file_path: String,
+  state: State<'_, AppState>,
+) -> Result<Vec<f32>, String> {
+  // 1. Check cache first.
+  {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    if let Some(cached) = db.get_waveform(&file_path).map_err(|e| e.to_string())? {
+      return Ok(cached);
+    }
+  }
+
+  // 2. Not cached — decode, store, return.
+  let peaks = crate::decoder::waveform::extract_peaks(std::path::Path::new(&file_path));
+
+  // Persist for next time.
+  {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.set_waveform(&file_path, &peaks).map_err(|e| e.to_string())?;
+  }
+
+  Ok(peaks)
+}
+
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+  // Security: only allow reading from common media/text directories.
+  // This is used for AutoEQ import files — restrict to user's known paths.
+  let canonical = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
+  // Strip Windows UNC prefix (\\?\) so comparison with dirs:: paths works
+  let canonical_str = canonical.to_string_lossy()
+    .trim_start_matches(r"\\?\")
+    .to_lowercase();
+  let allowed = [
+    dirs::download_dir().map(|p| p.to_string_lossy().to_lowercase()),
+    dirs::audio_dir().map(|p| p.to_string_lossy().to_lowercase()),
+    dirs::home_dir().map(|p| p.to_string_lossy().to_lowercase()),
+    dirs::document_dir().map(|p| p.to_string_lossy().to_lowercase()),
+    dirs::desktop_dir().map(|p| p.to_string_lossy().to_lowercase()),
+  ];
+  let is_allowed = allowed.iter().any(|opt| {
+    if let Some(ref dir) = opt {
+      canonical_str.starts_with(dir)
+    } else {
+      false
+    }
+  });
+  if !is_allowed {
+    return Err("Access denied: file path not in allowed directories".into());
+  }
+  // Limit file size to 1MB to prevent OOM
+  let meta = std::fs::metadata(&canonical).map_err(|e| e.to_string())?;
+  if meta.len() > 1_048_576 {
+    return Err("File too large (max 1MB)".into());
+  }
+  std::fs::read_to_string(&canonical).map_err(|e| e.to_string())
 }

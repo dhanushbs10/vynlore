@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { motion } from "framer-motion";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 
 interface Playlist {
   id: number;
   name: string;
   track_count: number;
+  cover_path: string | null;
+  color: string | null;
 }
 
 interface PlaylistsViewProps {
@@ -55,56 +56,66 @@ export function PlaylistsView(props: PlaylistsViewProps) {
   };
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+    <div>
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="font-display text-2xl font-bold text-text tracking-tight">Playlists</h1>
           <p className="text-sm text-text-secondary mt-1">{playlists.length} playlists</p>
         </div>
-        <motion.button
-          className="px-4 py-2 rounded-lg bg-accent text-bg text-sm font-semibold cursor-pointer transition-transform"
+        <button
+          className="px-4 py-2 rounded-lg bg-white text-black text-sm font-semibold cursor-pointer"
           onClick={() => setShowCreate(!showCreate)}
-          whileTap={{ scale: 0.95 }}
         >
           + New Playlist
-        </motion.button>
+        </button>
       </div>
 
       {showCreate && (
         <div className="flex gap-2.5 mb-5">
           <input
-            className="flex-1 max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors"
+            className="flex-1 max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-white/30 transition-colors"
             placeholder="Playlist name..."
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleCreate();
+              else if (e.key === "Escape") { setShowCreate(false); setNewName(""); }
+            }}
           />
-          <motion.button
-            className="px-4 py-2 rounded-lg bg-accent text-bg text-sm font-semibold cursor-pointer transition-transform"
+          <button
+            className="px-4 py-2 rounded-lg bg-white text-black text-sm font-semibold cursor-pointer"
             onClick={handleCreate}
-            whileTap={{ scale: 0.95 }}
           >
             Create
-          </motion.button>
+          </button>
         </div>
       )}
 
-      <motion.div
-        className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-[18px]"
-        variants={{ show: { transition: { staggerChildren: 0.03 } } }}
-        initial="hidden"
-        animate="show"
-      >
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
         {playlists.map((playlist) => (
-          <motion.div
+          <div
             key={playlist.id}
-            variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
-            whileHover={{ y: -3, transition: { type: "spring", stiffness: 400, damping: 25 } }}
             className="cursor-pointer group"
             onClick={() => onPlaylistClick(playlist.id)}
           >
-            <div className="w-full aspect-square bg-bg-surface rounded-xl flex items-center justify-center text-[48px] font-bold text-text-muted relative group">
-              ♪
+            <div
+              className="w-full aspect-square rounded-md flex items-center justify-center text-[48px] font-bold text-text-muted relative group overflow-hidden"
+              style={playlist.cover_path
+                ? undefined
+                : playlist.color
+                  ? { background: `linear-gradient(135deg, ${playlist.color}, ${playlist.color}88, rgba(0,0,0,0.4))` }
+                  : { background: "var(--color-bg-surface)" }
+              }
+            >
+              {playlist.cover_path ? (
+                <img
+                  src={convertFileSrc(playlist.cover_path)}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              ) : (
+                <span>♪</span>
+              )}
               {playlist.name !== "Liked Songs" && (
                 <button
                   onClick={(e) => handleDelete(e, playlist.id, playlist.name)}
@@ -117,9 +128,9 @@ export function PlaylistsView(props: PlaylistsViewProps) {
             </div>
             <div className="mt-2 text-sm font-medium text-text truncate">{playlist.name}</div>
             <div className="text-xs text-text-secondary truncate mt-0.5">{playlist.track_count} tracks</div>
-          </motion.div>
+          </div>
         ))}
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

@@ -10,7 +10,6 @@ pub struct AppState {
 	pub playback: Mutex<Option<PlaybackHandle>>,
 	pub volume: Arc<AtomicU32>,
 	pub eq: crate::audio::eq::SharedEq,
-	pub current_path: Mutex<Option<std::path::PathBuf>>,
 	pub spectrum: Arc<SpectrumAnalyzer>,
 	pub balance: Arc<AtomicU32>,
 	pub preamp: Arc<AtomicU32>,

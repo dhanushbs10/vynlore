@@ -2,7 +2,19 @@ import React, { createContext, useContext, useEffect, useState, useRef, useCallb
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Track, RepeatMode } from "../types";
-import { EQ_BANDS_HZ, EQ_MAX_GAIN, EQ_PRESETS, presetForGenre } from "../audio/eqPresets";
+import {
+  EQ_BANDS_HZ,
+  EQ_MAX_GAIN,
+  EQ_MAX_BOOST,
+  EQ_PRESETS,
+  MIN_BAND_COUNT,
+  MAX_BAND_COUNT,
+  DEFAULT_Q,
+  defaultBandHz,
+  defaultGains,
+  defaultQs,
+  presetForGenre,
+} from "../audio/eqPresets";
 
 const EQ_PRESET_KEYS = new Set(EQ_PRESETS.map((p) => p.key));
 
@@ -24,13 +36,25 @@ interface PlayerContextType {
     eqGains: number[];
     eqAuto: boolean;
     eqPreset: string | null;
+    eqParametric: boolean;
+    eqQs: number[];
+    eqBandHz: number[];
+    eqBandCount: number;
+    eqBassBoostDb: number;
+    eqTrebleBoostDb: number;
     seekTime: (time: number) => void;
     setSelectedDevice: (deviceIndex: number) => void;
     setVolume: (volume: number) => void;
     toggleExclusive: () => void;
     toggleEq: () => void;
     toggleEqAuto: () => void;
+    toggleEqParametric: () => void;
     setEqBand: (bandIndex: number, gain: number) => void;
+    setEqBandQ: (bandIndex: number, q: number) => void;
+    setBandCount: (count: number) => void;
+    setEqFreqs: (freqs: number[]) => void;
+    setBassBoostDb: (db: number) => void;
+    setTrebleBoostDb: (db: number) => void;
     applyEqPreset: (presetKey: string) => void;
     resetEq: () => void;
     playTrack: (track: Track, queue?: Track[]) => Promise<void>;
@@ -58,18 +82,43 @@ interface EqPersisted {
     enabled: boolean;
     gains: number[];
     auto: boolean;
+    preset?: string | null;
+    parametric?: boolean;
+    qs?: number[];
+    bandHz?: number[];
+    bandCount?: number;
+    bassBoostDb?: number;
+    trebleBoostDb?: number;
 }
-
-const DEFAULT_EQ_GAINS: number[] = new Array(EQ_BANDS_HZ.length).fill(0);
 
 function clampGain(g: number): number {
     const stepped = Math.round(g * 2) / 2;
     return Math.min(EQ_MAX_GAIN, Math.max(-EQ_MAX_GAIN, stepped));
 }
 
-function sanitizeGains(raw: unknown): number[] {
-    if (!Array.isArray(raw) || raw.length !== EQ_BANDS_HZ.length) return [...DEFAULT_EQ_GAINS];
-    return raw.map((g) => (typeof g === "number" && Number.isFinite(g) ? clampGain(g) : 0));
+function clampBoost(v: number): number {
+    return Math.min(EQ_MAX_BOOST, Math.max(-EQ_MAX_BOOST, v));
+}
+
+function sanitizeGains(raw: unknown, count: number): number[] {
+    if (!Array.isArray(raw)) return defaultGains(count);
+    return Array.from({ length: count }, (_, i) => {
+        const g = raw[i];
+        return typeof g === "number" && Number.isFinite(g) ? clampGain(g) : 0;
+    });
+}
+
+function sanitizeQs(raw: unknown, count: number): number[] {
+    if (!Array.isArray(raw)) return defaultQs(count);
+    return Array.from({ length: count }, (_, i) => {
+        const q = raw[i];
+        return typeof q === "number" && Number.isFinite(q) ? Math.min(10, Math.max(0.3, q)) : DEFAULT_Q;
+    });
+}
+
+function sanitizeBandHz(raw: unknown, count: number): number[] {
+    if (!Array.isArray(raw) || raw.length !== count) return defaultBandHz(count);
+    return raw.map((v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 1000));
 }
 
 function loadStoredEq(): EqPersisted {
@@ -77,16 +126,35 @@ function loadStoredEq(): EqPersisted {
         const raw = window.localStorage.getItem(EQ_KEY);
         if (raw) {
             const parsed = JSON.parse(raw) as Partial<EqPersisted>;
+            const bandCount = parsed.bandCount ?? (Array.isArray(parsed.gains) ? parsed.gains.length : EQ_BANDS_HZ.length);
+            const safeCount = Math.min(MAX_BAND_COUNT, Math.max(MIN_BAND_COUNT, bandCount));
             return {
                 enabled: parsed.enabled === true,
-                gains: sanitizeGains(parsed.gains),
+                gains: sanitizeGains(parsed.gains, safeCount),
                 auto: parsed.auto !== false,
+                parametric: parsed.parametric === true,
+                qs: sanitizeQs(parsed.qs, safeCount),
+                bandHz: sanitizeBandHz(parsed.bandHz, safeCount),
+                bandCount: safeCount,
+                bassBoostDb: typeof parsed.bassBoostDb === "number" ? clampBoost(parsed.bassBoostDb) : 0,
+                trebleBoostDb: typeof parsed.trebleBoostDb === "number" ? clampBoost(parsed.trebleBoostDb) : 0,
             };
         }
     } catch {
         // localStorage unavailable / malformed
     }
-    return { enabled: false, gains: [...DEFAULT_EQ_GAINS], auto: true };
+    const count = EQ_BANDS_HZ.length;
+    return {
+        enabled: false,
+        gains: defaultGains(count),
+        auto: true,
+        parametric: false,
+        qs: defaultQs(count),
+        bandHz: defaultBandHz(count),
+        bandCount: count,
+        bassBoostDb: 0,
+        trebleBoostDb: 0,
+    };
 }
 
 function loadStoredVolume(): number {
@@ -127,6 +195,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
+    const isPausedRef = useRef(isPaused);
     const [selectedDevice, setSelectedDeviceState] = useState<number | null>(() => loadStoredDevice());
     const [isShuffle, setIsShuffle] = useState(false);
     const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
@@ -134,10 +203,17 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [volume, _setVolume] = useState<number>(() => loadStoredVolume());
     const [exclusiveEnabled, setExclusiveEnabled] = useState<boolean>(() => loadStoredExclusive());
     const [exclusiveActive, setExclusiveActive] = useState(false);
-    const [eqEnabled, setEqEnabled] = useState<boolean>(() => loadStoredEq().enabled);
-    const [eqGains, setEqGains] = useState<number[]>(() => loadStoredEq().gains);
-    const [eqAuto, setEqAuto] = useState<boolean>(() => loadStoredEq().auto);
-    const [eqPreset, setEqPreset] = useState<string | null>(null);
+    const storedEq = React.useMemo(() => loadStoredEq(), []);
+    const [eqEnabled, setEqEnabled] = useState<boolean>(storedEq.enabled);
+    const [eqGains, setEqGains] = useState<number[]>(storedEq.gains);
+    const [eqAuto, setEqAuto] = useState<boolean>(storedEq.auto);
+    const [eqPreset, setEqPreset] = useState<string | null>(storedEq.preset ?? null);
+    const [eqParametric, setEqParametric] = useState<boolean>(storedEq.parametric ?? false);
+    const [eqQs, setEqQs] = useState<number[]>(storedEq.qs ?? defaultQs(storedEq.bandCount ?? 10));
+    const [eqBandHz, setEqBandHz] = useState<number[]>(storedEq.bandHz ?? defaultBandHz(storedEq.bandCount ?? 10));
+    const [eqBandCount, setEqBandCountState] = useState<number>(storedEq.bandCount ?? EQ_BANDS_HZ.length);
+    const [eqBassBoostDb, setEqBassBoostDbState] = useState<number>(storedEq.bassBoostDb ?? 0);
+    const [eqTrebleBoostDb, setEqTrebleBoostDbState] = useState<number>(storedEq.trebleBoostDb ?? 0);
 
     const volumeRef = useRef(volume);
     const selectedDeviceRef = useRef(selectedDevice);
@@ -146,23 +222,44 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const eqGainsRef = useRef(eqGains);
     const eqAutoRef = useRef(eqAuto);
     const eqSourceRef = useRef<string>("manual");
+    const eqPresetRef = useRef(eqPreset);
+    const eqParametricRef = useRef(eqParametric);
+    const eqQsRef = useRef(eqQs);
+    const eqBandHzRef = useRef(eqBandHz);
+    const eqBandCountRef = useRef(eqBandCount);
+    const eqBassBoostRef = useRef(eqBassBoostDb);
+    const eqTrebleBoostRef = useRef(eqTrebleBoostDb);
     const displayedTracksRef = useRef(displayedTracks);
     const currentTrackRef = useRef(currentTrack);
     const repeatModeRef = useRef(repeatMode);
     const preShuffleQueueRef = useRef<Track[]>([]);
     const lastQueuedNextRef = useRef<string | null>(null);
+    const playInFlightRef = useRef(false);
+    const lastRequestedTrackRef = useRef<string>("");
     const actionsRef = useRef<{ togglePlayPause: () => void; playNext: () => Promise<void>; playPrev: () => Promise<void> }>({
         togglePlayPause: () => {},
         playNext: async () => {},
         playPrev: async () => {},
     });
+    // Monotonically increasing counter that bumps every time a new playback
+    // starts.  The polling interval reads this to discard stale get_position
+    // results that were dispatched before setCurrentTime(0) was committed.
+    const playbackGenerationRef = useRef(0);
 
     volumeRef.current = volume;
     selectedDeviceRef.current = selectedDevice;
     exclusiveRef.current = exclusiveEnabled;
+    isPausedRef.current = isPaused;
     eqEnabledRef.current = eqEnabled;
     eqGainsRef.current = eqGains;
     eqAutoRef.current = eqAuto;
+    eqPresetRef.current = eqPreset;
+    eqParametricRef.current = eqParametric;
+    eqQsRef.current = eqQs;
+    eqBandHzRef.current = eqBandHz;
+    eqBandCountRef.current = eqBandCount;
+    eqBassBoostRef.current = eqBassBoostDb;
+    eqTrebleBoostRef.current = eqTrebleBoostDb;
     displayedTracksRef.current = displayedTracks;
     currentTrackRef.current = currentTrack;
     repeatModeRef.current = repeatMode;
@@ -174,8 +271,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (mode === "one") {
             await playTrack(track);
         } else {
-            // Advance through the queue; stops naturally at the end unless
-            // repeat-all wraps. No more stopping after every single track.
             await playNextInternal();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -197,13 +292,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         listen<{ path: string }>("track-changed", (event) => {
             if (disposed) return;
+            if (event.payload.path !== lastRequestedTrackRef.current) return;
             const queue = displayedTracksRef.current;
             const idx = queue.findIndex((t) => t.file_path === event.payload.path);
             if (idx === -1) return;
             setCurrentTime(0);
             setCurrentTrackIndex(idx);
             setCurrentTrack(queue[idx]);
-            invoke("increment_play_count", { filePath: event.payload.path }).catch(() => {});
         }).then((fn) => {
             if (disposed) fn();
             else unlistenChanged = fn;
@@ -235,9 +330,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         };
     }, [handlePlaybackEnded]);
 
-    // Gapless: keep the backend's next-track slot in sync with the visible
-    // queue + repeat mode. Backend chains seamlessly only when channel counts
-    // match; otherwise it falls back to a clean stop/start transition.
     useEffect(() => {
         if (!isTauri()) return;
         let desired: string | null = null;
@@ -250,7 +342,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         : repeatMode === "all"
                           ? displayedTracks[0]
                           : null;
-                if (raw && raw.channels === currentTrack.channels) {
+                if (raw) {
                     desired = raw.file_path;
                 }
             }
@@ -258,7 +350,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (desired === lastQueuedNextRef.current) return;
         lastQueuedNextRef.current = desired;
         invoke("queue_next_track", { nextPath: desired }).catch(() => {
-            lastQueuedNextRef.current = undefined as unknown as string | null;
+            lastQueuedNextRef.current = null;
         });
     }, [currentTrack, displayedTracks, repeatMode]);
 
@@ -268,7 +360,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         const poll = window.setInterval(async () => {
             try {
+                const gen = playbackGenerationRef.current;
                 const pos = await invoke<number>("get_position");
+                // Discard stale results from a poll that was dispatched before
+                // the most recent setCurrentTime(0) in playTrack.  Without this,
+                // an in-flight get_position could briefly overwrite the reset to
+                // 0 with the old track's final position.
+                if (gen !== playbackGenerationRef.current) return;
                 setCurrentTime(pos);
             } catch {
                 // backend stream gone; next tick or track change recovers
@@ -318,19 +416,18 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         _setDisplayedTracks(next);
         const currentId = currentTrackRef.current?.id;
         setCurrentTrackIndex(currentId === undefined ? -1 : next.findIndex((t) => t.id === currentId));
-        // The gapless-sync effect re-arms the backend slot automatically.
     }, []);
 
-    const setSelectedDevice = (deviceIndex: number) => {
+    const setSelectedDevice = useCallback((deviceIndex: number) => {
         setSelectedDeviceState(deviceIndex);
         try {
             window.localStorage.setItem(DEVICE_KEY, String(deviceIndex));
         } catch {
             // ignore
         }
-    };
+    }, []);
 
-    const setVolume = (newVolume: number) => {
+    const setVolume = useCallback((newVolume: number) => {
         const clamped = Math.min(1, Math.max(0, newVolume));
         _setVolume(clamped);
         try {
@@ -341,12 +438,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (isTauri()) {
             invoke("set_volume", { volume: clamped }).catch(() => {});
         }
-    };
+    }, []);
 
     useEffect(() => {
         if (isTauri()) {
             invoke("set_volume", { volume: volumeRef.current }).catch(() => {});
-            // Restore persisted balance and preamp so the first playback honors them.
             try {
                 const balRaw = window.localStorage.getItem(BALANCE_KEY);
                 if (balRaw !== null) {
@@ -356,28 +452,74 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 const preRaw = window.localStorage.getItem(PREAMP_KEY);
                 if (preRaw !== null) {
                     const pre = Number(preRaw);
-                    if (Number.isFinite(pre)) invoke("set_preamp", { preamp: pre }).catch(() => {});
+                    if (Number.isFinite(pre)) invoke("set_preamp", { preamp: Math.max(0.5, pre) }).catch(() => {});
                 }
             } catch { /* ignore */ }
         }
     }, []);
 
-    // EQ: push stored settings to the backend once on startup so the first
-    // playback already honors them.
-    const pushEq = useCallback((enabled: boolean, gains: number[]) => {
+    // --- EQ plumbing ---
+
+    const pushEq = useCallback((
+        enabled: boolean,
+        gains: number[],
+        parametric: boolean,
+        qs: number[],
+        bandHz: number[],
+        bassBoostDb: number,
+        trebleBoostDb: number,
+    ) => {
         if (!isTauri()) return;
-        invoke("update_eq", { enabled, gains }).catch(() => {});
+        invoke("update_eq", {
+            enabled,
+            gains,
+            parametric,
+            qs,
+            bandHz,
+            bassBoostDb,
+            trebleBoostDb,
+        }).catch(() => {});
     }, []);
 
     useEffect(() => {
-        pushEq(eqEnabledRef.current, eqGainsRef.current);
+        pushEq(
+            eqEnabledRef.current,
+            eqGainsRef.current,
+            eqParametricRef.current,
+            eqQsRef.current,
+            eqBandHzRef.current,
+            eqBassBoostRef.current,
+            eqTrebleBoostRef.current,
+        );
     }, [pushEq]);
 
-    const persistEq = useCallback((enabled: boolean, gains: number[], auto: boolean) => {
+    const persistEq = useCallback((
+        enabled: boolean,
+        gains: number[],
+        auto: boolean,
+        preset: string | null,
+        parametric: boolean,
+        qs: number[],
+        bandHz: number[],
+        bandCount: number,
+        bassBoostDb: number,
+        trebleBoostDb: number,
+    ) => {
         try {
             window.localStorage.setItem(
                 EQ_KEY,
-                JSON.stringify({ enabled, gains, auto } satisfies EqPersisted)
+                JSON.stringify({
+                    enabled,
+                    gains,
+                    auto,
+                    preset,
+                    parametric,
+                    qs,
+                    bandHz,
+                    bandCount,
+                    bassBoostDb,
+                    trebleBoostDb,
+                } satisfies EqPersisted)
             );
         } catch {
             // localStorage unavailable
@@ -386,26 +528,176 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const applyEqGains = useCallback(
         (gains: number[], source: string) => {
-            const safe = sanitizeGains(gains);
+            const safe = sanitizeGains(gains, eqBandCountRef.current);
             eqSourceRef.current = source;
             setEqGains(safe);
             eqGainsRef.current = safe;
             const presetKey = source.startsWith("auto:") ? source.slice(5) : source;
             setEqPreset(EQ_PRESET_KEYS.has(presetKey) ? presetKey : null);
-            persistEq(eqEnabledRef.current, safe, eqAutoRef.current);
-            pushEq(eqEnabledRef.current, safe);
+            persistEq(
+                eqEnabledRef.current, safe, eqAutoRef.current,
+                EQ_PRESET_KEYS.has(presetKey) ? presetKey : null,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+            pushEq(
+                eqEnabledRef.current, safe,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
         },
         [persistEq, pushEq]
     );
 
     const setEqBand = useCallback(
         (bandIndex: number, gain: number) => {
-            if (bandIndex < 0 || bandIndex >= EQ_BANDS_HZ.length) return;
+            if (bandIndex < 0 || bandIndex >= eqGainsRef.current.length) return;
             const next = [...eqGainsRef.current];
             next[bandIndex] = clampGain(gain);
             applyEqGains(next, "manual");
         },
         [applyEqGains]
+    );
+
+    const setEqBandQ = useCallback(
+        (bandIndex: number, q: number) => {
+            if (bandIndex < 0 || bandIndex >= eqQsRef.current.length) return;
+            const next = [...eqQsRef.current];
+            next[bandIndex] = Math.min(10, Math.max(0.3, q));
+            setEqQs(next);
+            eqQsRef.current = next;
+            persistEq(
+                eqEnabledRef.current, eqGainsRef.current, eqAutoRef.current,
+                eqPresetRef.current,
+                eqParametricRef.current, next, eqBandHzRef.current,
+                eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+            pushEq(
+                eqEnabledRef.current, eqGainsRef.current,
+                eqParametricRef.current, next, eqBandHzRef.current,
+                eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+        },
+        [persistEq, pushEq]
+    );
+
+    const toggleEqParametric = useCallback(() => {
+        setEqParametric((prev) => {
+            const next = !prev;
+            eqParametricRef.current = next;
+            persistEq(
+                eqEnabledRef.current, eqGainsRef.current, eqAutoRef.current,
+                eqPresetRef.current,
+                next, eqQsRef.current, eqBandHzRef.current,
+                eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+            pushEq(
+                eqEnabledRef.current, eqGainsRef.current,
+                next, eqQsRef.current, eqBandHzRef.current,
+                eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+            return next;
+        });
+    }, [persistEq, pushEq]);
+
+    const setBandCount = useCallback(
+        (count: number) => {
+            const safeCount = Math.min(MAX_BAND_COUNT, Math.max(MIN_BAND_COUNT, count));
+            const newHz = defaultBandHz(safeCount);
+            const newGains = defaultGains(safeCount);
+            const newQs = defaultQs(safeCount);
+            setEqBandCountState(safeCount);
+            eqBandCountRef.current = safeCount;
+            setEqBandHz(newHz);
+            eqBandHzRef.current = newHz;
+            setEqGains(newGains);
+            eqGainsRef.current = newGains;
+            setEqQs(newQs);
+            eqQsRef.current = newQs;
+            setEqPreset(null);
+            eqSourceRef.current = "manual";
+            persistEq(
+                eqEnabledRef.current, newGains, eqAutoRef.current,
+                null,
+                eqParametricRef.current, newQs, newHz,
+                safeCount, eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+            pushEq(
+                eqEnabledRef.current, newGains,
+                eqParametricRef.current, newQs, newHz,
+                eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+        },
+        [persistEq, pushEq]
+    );
+
+    const setEqFreqs = useCallback(
+        (freqs: number[]) => {
+            if (freqs.length < MIN_BAND_COUNT || freqs.length > MAX_BAND_COUNT) return;
+            const safeFreqs = freqs.map((f) => (Number.isFinite(f) && f > 0 ? f : 1000));
+            const newGains = Array.from({ length: safeFreqs.length }, (_, i) => eqGainsRef.current[i] ?? 0);
+            const newQs = Array.from({ length: safeFreqs.length }, (_, i) => eqQsRef.current[i] ?? DEFAULT_Q);
+            setEqBandHz(safeFreqs);
+            eqBandHzRef.current = safeFreqs;
+            setEqBandCountState(safeFreqs.length);
+            eqBandCountRef.current = safeFreqs.length;
+            setEqGains(newGains);
+            eqGainsRef.current = newGains;
+            setEqQs(newQs);
+            eqQsRef.current = newQs;
+            persistEq(
+                eqEnabledRef.current, newGains, eqAutoRef.current,
+                eqPresetRef.current,
+                eqParametricRef.current, newQs, safeFreqs,
+                safeFreqs.length, eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+            pushEq(
+                eqEnabledRef.current, newGains,
+                eqParametricRef.current, newQs, safeFreqs,
+                eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+        },
+        [persistEq, pushEq]
+    );
+
+    const setBassBoostDb = useCallback(
+        (db: number) => {
+            const clamped = clampBoost(db);
+            setEqBassBoostDbState(clamped);
+            eqBassBoostRef.current = clamped;
+            persistEq(
+                eqEnabledRef.current, eqGainsRef.current, eqAutoRef.current,
+                eqPresetRef.current,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                eqBandCountRef.current, clamped, eqTrebleBoostRef.current,
+            );
+            pushEq(
+                eqEnabledRef.current, eqGainsRef.current,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                clamped, eqTrebleBoostRef.current,
+            );
+        },
+        [persistEq, pushEq]
+    );
+
+    const setTrebleBoostDb = useCallback(
+        (db: number) => {
+            const clamped = clampBoost(db);
+            setEqTrebleBoostDbState(clamped);
+            eqTrebleBoostRef.current = clamped;
+            persistEq(
+                eqEnabledRef.current, eqGainsRef.current, eqAutoRef.current,
+                eqPresetRef.current,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                eqBandCountRef.current, eqBassBoostRef.current, clamped,
+            );
+            pushEq(
+                eqEnabledRef.current, eqGainsRef.current,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                eqBassBoostRef.current, clamped,
+            );
+        },
+        [persistEq, pushEq]
     );
 
     const applyEqPreset = useCallback(
@@ -418,15 +710,24 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     );
 
     const resetEq = useCallback(() => {
-        applyEqGains([...DEFAULT_EQ_GAINS], "flat");
+        applyEqGains(defaultGains(eqBandCountRef.current), "flat");
     }, [applyEqGains]);
 
     const toggleEq = useCallback(() => {
         setEqEnabled((prev) => {
             const next = !prev;
             eqEnabledRef.current = next;
-            persistEq(next, eqGainsRef.current, eqAutoRef.current);
-            pushEq(next, eqGainsRef.current);
+            persistEq(
+                next, eqGainsRef.current, eqAutoRef.current,
+                eqPresetRef.current,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
+            pushEq(
+                next, eqGainsRef.current,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
             return next;
         });
     }, [persistEq, pushEq]);
@@ -435,9 +736,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setEqAuto((prev) => {
             const next = !prev;
             eqAutoRef.current = next;
-            persistEq(eqEnabledRef.current, eqGainsRef.current, next);
+            persistEq(
+                eqEnabledRef.current, eqGainsRef.current, next,
+                eqPresetRef.current,
+                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+                eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
+            );
             if (next) {
-                // Apply immediately for the track that's already playing.
                 const preset = presetForGenre(currentTrackRef.current?.genre);
                 if (preset && eqSourceRef.current !== `auto:${preset.key}`) {
                     applyEqGains([...preset.gains], `auto:${preset.key}`);
@@ -447,11 +752,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
     }, [persistEq, applyEqGains]);
 
-    // Auto mode: whenever a track with a recognized genre starts playing,
-    // switch to its mapped preset (only when the user hasn't just chosen one).
-    const genreRef = useRef<string | null | undefined>(currentTrack?.genre);
     useEffect(() => {
-        genreRef.current = currentTrack?.genre;
         if (!eqAutoRef.current) return;
         const preset = presetForGenre(currentTrack?.genre);
         if (!preset) return;
@@ -490,43 +791,52 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await playTrack(queue[nextIndex]);
     }
 
-    const playTrack = async (track: Track, newQueue?: Track[]) => {
-        if (newQueue) {
-            _setDisplayedTracks(newQueue);
-            const idx = newQueue.findIndex((t) => t.id === track.id);
-            setCurrentTrackIndex(idx !== -1 ? idx : 0);
-        } else if (displayedTracks.length === 0) {
-            _setDisplayedTracks([track]);
-            setCurrentTrackIndex(0);
-        }
-
-        setCurrentTime(0);
-        setCurrentTrack(track);
-        setIsPlaying(true);
-        setIsPaused(false);
-
-        if (isTauri()) {
-            invoke("increment_play_count", { filePath: track.file_path }).catch(() => {});
-        }
+    const playTrack = useCallback(async (track: Track, newQueue?: Track[]) => {
+        // Dedup guard: only block if a playback start is already in flight.
+        // This prevents rapid double-invocation (overlapping stop→play) while
+        // still allowing repeat-one restarts and replays of the same track
+        // once the previous start has completed.
+        if (playInFlightRef.current) return;
+        playInFlightRef.current = true;
 
         try {
-            await invoke("stop_playback");
-            // Backend reports whether exclusive mode actually engaged (it
-            // silently falls back to shared when the endpoint refuses the
-            // file's native format).
-            const active = await invoke<boolean>("play_track", {
-                filePath: track.file_path,
-                deviceIndex: selectedDeviceRef.current,
-                exclusive: exclusiveRef.current,
-            });
-            setExclusiveActive(active);
-        } catch (error) {
-            console.error("Failed to play track:", error);
-            setIsPlaying(false);
-        }
-    };
+            if (newQueue) {
+                preShuffleQueueRef.current = [...displayedTracksRef.current];
+                _setDisplayedTracks(newQueue);
+                const idx = newQueue.findIndex((t) => t.id === track.id);
+                setCurrentTrackIndex(idx !== -1 ? idx : 0);
+            } else if (displayedTracksRef.current.length === 0) {
+                _setDisplayedTracks([track]);
+                setCurrentTrackIndex(0);
+            }
 
-    const toggleExclusive = () => {
+            playbackGenerationRef.current += 1;
+            lastRequestedTrackRef.current = track.file_path;
+            setCurrentTime(0);
+            setCurrentTrack(track);
+            setIsPlaying(true);
+            setIsPaused(false);
+
+            try {
+                await invoke("stop_playback");
+                const active = await invoke<boolean>("play_track", {
+                    filePath: track.file_path,
+                    deviceIndex: selectedDeviceRef.current,
+                    exclusive: exclusiveRef.current,
+                });
+                setExclusiveActive(active);
+                if (lastRequestedTrackRef.current !== track.file_path) return;
+                invoke("increment_play_count", { filePath: track.file_path }).catch(() => {});
+            } catch (error) {
+                console.error("Failed to play track:", error);
+                setIsPlaying(false);
+            }
+        } finally {
+            playInFlightRef.current = false;
+        }
+    }, []);
+
+    const toggleExclusive = useCallback(() => {
         setExclusiveEnabled((prev) => {
             const next = !prev;
             exclusiveRef.current = next;
@@ -536,18 +846,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 // localStorage unavailable
             }
             if (isTauri() && currentTrackRef.current) {
-                // Re-start the current track so the mode change is audible
-                // immediately instead of waiting for the next track.
                 void playTrack(currentTrackRef.current);
             }
             return next;
         });
-    };
+    }, [playTrack]);
 
-    const togglePlayPause = async () => {
-        if (!currentTrack) return;
+    const togglePlayPause = useCallback(async () => {
+        if (!currentTrackRef.current) return;
         try {
-            if (isPaused) {
+            if (isPausedRef.current) {
                 await invoke("resume_playback");
                 setIsPaused(false);
             } else {
@@ -557,9 +865,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         } catch (error) {
             console.error("Failed to toggle playback:", error);
         }
-    };
+    }, []);
 
-    const shufflePreservingCurrent = (tracks: Track[], currentIndex: number): Track[] => {
+    const shufflePreservingCurrent = useCallback((tracks: Track[], currentIndex: number): Track[] => {
         const current = tracks[currentIndex] ?? tracks[0];
         const without = tracks.filter((t) => t.id !== current.id);
         for (let i = without.length - 1; i > 0; i--) {
@@ -567,19 +875,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             [without[i], without[j]] = [without[j], without[i]];
         }
         return [current, ...without];
-    };
+    }, []);
 
-    const toggleShuffle = () => {
+    const toggleShuffle = useCallback(() => {
         const newShuffle = !isShuffle;
         setIsShuffle(newShuffle);
 
         if (newShuffle) {
-            preShuffleQueueRef.current = [...displayedTracks];
-            if (displayedTracks.length > 1 && currentTrack) {
-                const idx = displayedTracks.findIndex(
-                    (t) => currentTrack && t.id === currentTrack.id
+            preShuffleQueueRef.current = [...displayedTracksRef.current];
+            if (displayedTracksRef.current.length > 1 && currentTrackRef.current) {
+                const idx = displayedTracksRef.current.findIndex(
+                    (t) => currentTrackRef.current && t.id === currentTrackRef.current.id
                 );
-                const shuffled = shufflePreservingCurrent([...displayedTracks], idx >= 0 ? idx : 0);
+                const shuffled = shufflePreservingCurrent([...displayedTracksRef.current], idx >= 0 ? idx : 0);
                 _setDisplayedTracks(shuffled);
                 setCurrentTrackIndex(0);
             }
@@ -588,21 +896,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 preShuffleQueueRef.current.length > 0
                     ? [...preShuffleQueueRef.current]
                     : [...displayedTracksRef.current];
-            const idx = currentTrack ? restored.findIndex((t) => t.id === currentTrack.id) : -1;
+            const cur = currentTrackRef.current;
+            const idx = cur ? restored.findIndex((t) => t.id === cur.id) : -1;
             _setDisplayedTracks(restored);
             setCurrentTrackIndex(idx >= 0 ? idx : 0);
         }
-    };
+    }, [isShuffle, shufflePreservingCurrent]);
 
-    const toggleRepeat = () => {
+    const toggleRepeat = useCallback(() => {
         setRepeatMode((prev) => {
             if (prev === "off") return "all";
             if (prev === "all") return "one";
             return "off";
         });
-    };
+    }, []);
 
-    const stop = async () => {
+    const stop = useCallback(async () => {
         try {
             await invoke("stop_playback");
         } catch (error) {
@@ -613,9 +922,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setCurrentTrack(null);
         setCurrentTime(0);
         setCurrentTrackIndex(-1);
-    };
+    }, []);
 
-    const playPrev = async () => {
+    const playPrev = useCallback(async () => {
         const queue = displayedTracksRef.current;
         if (queue.length === 0) return;
         let idx = queue.findIndex((t) => t.id === currentTrackRef.current?.id);
@@ -623,7 +932,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const prevIndex = idx - 1 >= 0 ? idx - 1 : queue.length - 1;
         setCurrentTrackIndex(prevIndex);
         await playTrack(queue[prevIndex]);
-    };
+    }, [playTrack]);
 
     const playNext = playNextInternal;
 
@@ -649,13 +958,25 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 eqGains,
                 eqAuto,
                 eqPreset,
+                eqParametric,
+                eqQs,
+                eqBandHz,
+                eqBandCount,
+                eqBassBoostDb,
+                eqTrebleBoostDb,
                 seekTime,
                 setSelectedDevice,
                 setVolume,
                 toggleExclusive,
                 toggleEq,
                 toggleEqAuto,
+                toggleEqParametric,
                 setEqBand,
+                setEqBandQ,
+                setBandCount,
+                setEqFreqs,
+                setBassBoostDb,
+                setTrebleBoostDb,
                 applyEqPreset,
                 resetEq,
                 playTrack,

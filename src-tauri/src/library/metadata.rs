@@ -117,10 +117,19 @@ pub fn read_metadata(path: &Path) -> Result<TrackMetadata, Box<dyn std::error::E
   let mut cover_path = String::new();
 
   if let Some(picture) = tag.pictures().first() {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    use std::hash::Hasher;
-    hasher.write(picture.data());
-    let hash = hasher.finish();
+    let data = picture.data();
+    let len = data.len() as u64;
+    let mut hash: u64 = len;
+    if !data.is_empty() {
+        hash = hash.wrapping_mul(0x100000001b3).wrapping_add(data[0] as u64);
+        hash = hash.wrapping_mul(0x100000001b3).wrapping_add(data[data.len() - 1] as u64);
+        let step = if data.len() > 128 { 16 } else { 1 };
+        for (i, &b) in data.iter().enumerate().skip(1).take(data.len().saturating_sub(2)) {
+            if i % step == 0 {
+                hash = hash.wrapping_mul(0x100000001b3).wrapping_add(b as u64);
+            }
+        }
+    }
     let ext = match picture.mime_type() {
       lofty::MimeType::Png => "png",
       _ => "jpg",
@@ -131,10 +140,8 @@ pub fn read_metadata(path: &Path) -> Result<TrackMetadata, Box<dyn std::error::E
     fs::create_dir_all(&cache_dir)?;
     let out_path = cache_dir.join(format!("{:016x}.{}", hash, ext));
 
-    if !out_path.exists() {
-      let mut file = fs::File::create(&out_path)?;
-      file.write_all(picture.data())?;
-    }
+    let mut file = fs::File::create(&out_path)?;
+    file.write_all(picture.data())?;
     cover_path = out_path.to_string_lossy().to_string();
   }
 
@@ -162,7 +169,9 @@ fn get_lyrics(tag: &lofty::Tag) -> String {
 
   for item in tag.items() {
     if *item.key() == ItemKey::Lyrics {
-      return format!("{:?}", item.value());
+      if let lofty::ItemValue::Text(s) = item.value() {
+        return s.clone();
+      }
     }
   }
 

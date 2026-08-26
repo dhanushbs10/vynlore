@@ -2,7 +2,7 @@ export function parseArtists(artistString: string): string[] {
 	if (!artistString || !artistString.trim()) return [];
 
 	const delimiters = [",", "&", "/"];
-	const keywords = ["feat.", "ft.", "x"];
+	const keywords = ["feat.", "ft."];
 
 	let parts: string[] = [artistString];
 
@@ -34,5 +34,11 @@ export function parseArtists(artistString: string): string[] {
 		if (!split) keywordParts.push(trimmed);
 	}
 
-	return keywordParts.filter((a) => a.length > 0);
+	const result: string[] = [];
+	for (const part of keywordParts) {
+		const splitByX = part.split(/\s+x\s+/i);
+		result.push(...splitByX);
+	}
+
+	return result.filter((a) => a.length > 0);
 }

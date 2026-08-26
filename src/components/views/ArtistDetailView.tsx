@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { ArrowLeft, Play, Shuffle } from "lucide-react";
+import { ArrowLeft, Play, Shuffle, Repeat, Repeat1 } from "lucide-react";
 import { motion } from "framer-motion";
 import { parseArtists } from "../../utils/artists";
 import { usePlayer } from "../../context/PlayerContext";
@@ -16,7 +16,7 @@ interface ArtistDetailViewProps {
 }
 
 export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDetailViewProps) {
-  const { currentTrack, isShuffle, toggleShuffle } = usePlayer();
+  const { currentTrack, isShuffle, toggleShuffle, repeatMode, toggleRepeat } = usePlayer();
 
   const artistTracks = useMemo(
     () => tracks.filter((t) => parseArtists(t.artist).includes(artist)),
@@ -79,10 +79,10 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
             <img
               src={coverSrc}
               alt={artist}
-              className="w-[220px] h-[220px] rounded-xl object-cover shadow-[0_16px_48px_rgba(0,0,0,0.45)]"
+              className="w-[220px] h-[220px] rounded-md object-cover"
             />
           ) : (
-            <div className="w-[220px] h-[220px] rounded-xl bg-gradient-to-br from-bg-elevated to-bg-surface shadow-[0_16px_48px_rgba(0,0,0,0.45)]" />
+            <div className="w-[220px] h-[220px] rounded-md bg-bg-surface" />
           )}
         </div>
 
@@ -90,7 +90,7 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
           <div className="text-[22px] font-bold text-text">{artist}</div>
           <div className="flex gap-2.5">
             <motion.button
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-bg-raised text-text-secondary text-xs font-semibold hover:bg-bg-hover hover:text-text transition-colors w-auto"
+              className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white/5 hover:text-text transition-colors w-auto"
               onClick={handleShuffle}
               whileTap={{ scale: 0.95 }}
               aria-label="Shuffle artist"
@@ -99,13 +99,20 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
               <span>Shuffle</span>
             </motion.button>
             <motion.button
-              className="w-11 h-11 rounded-full bg-accent text-bg flex items-center justify-center shadow-[0_0_20px_var(--color-accent-glow)] hover:scale-105 active:scale-95 transition-transform"
+              className="w-11 h-11 rounded-full bg-white text-black flex items-center justify-center transition-transform"
               onClick={handlePlayArtist}
               whileTap={{ scale: 0.95 }}
               aria-label="Play artist"
             >
               <Play size={18} fill="currentColor" />
             </motion.button>
+            <button
+              className={`inline-flex items-center justify-center w-9 h-9 rounded-lg border-none bg-transparent p-0 cursor-pointer transition-colors ${repeatMode === "off" ? "text-text-muted" : "text-white"}`}
+              aria-label="Repeat"
+              onClick={toggleRepeat}
+            >
+              {repeatMode === "one" ? <Repeat1 size={15} /> : <Repeat size={15} />}
+            </button>
           </div>
         </div>
       </div>
@@ -123,10 +130,10 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
                   <img
                     src={albumCover}
                     alt={album}
-                    className="w-[52px] h-[52px] rounded-lg object-cover shadow-[0_8px_20px_rgba(0,0,0,0.35)]"
+                    className="w-[52px] h-[52px] rounded-md object-cover"
                   />
                 ) : (
-                  <div className="w-[52px] h-[52px] rounded-lg bg-bg-raised shrink-0" />
+                  <div className="w-[52px] h-[52px] rounded-md bg-bg-surface shrink-0" />
                 )}
                 <div className="text-lg font-bold text-text">{album}</div>
               </div>
@@ -151,7 +158,7 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
                     return (
                       <div
                         key={track.id}
-                        className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer hover:bg-bg-hover transition-colors ${active ? "bg-accent-soft" : ""}`}
+                        className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${active ? "bg-white/5" : ""}`}
                         onClick={() => playTrack(track, artistTracks)}
                       >
                         <div className="w-12">

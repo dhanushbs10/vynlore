@@ -39,15 +39,33 @@ pub fn find_best_config(
 ) -> Result<cpal::SupportedStreamConfig, Box<dyn std::error::Error>> {
 	let configs: Vec<_> = device.supported_output_configs()?.collect();
 
-	for config in configs.iter() {
-		if config.channels() == channels && config.sample_format() == cpal::SampleFormat::F32 {
-			return Ok(config.with_max_sample_rate());
+	// Prefer F32 at a common sample rate (48 kHz / 44.1 kHz) to avoid forcing
+	// the device to an exotic rate (e.g. 192 kHz) that can hog the WASAPI
+	// shared-mode session and block other applications from outputting audio.
+	let common_rates: [u32; 4] = [48000, 44100, 96000, 88200];
+	for &rate in &common_rates {
+		for config in configs.iter() {
+			if config.channels() == channels
+				&& config.sample_format() == cpal::SampleFormat::F32
+				&& config.min_sample_rate().0 <= rate
+				&& config.max_sample_rate().0 >= rate
+			{
+				return Ok(config.with_sample_rate(cpal::SampleRate(rate)));
+			}
 		}
 	}
 
+	// Fallback: any F32 config at its min rate (conservative).
+	for config in configs.iter() {
+		if config.channels() == channels && config.sample_format() == cpal::SampleFormat::F32 {
+			return Ok(config.with_sample_rate(config.min_sample_rate()));
+		}
+	}
+
+	// Last resort: any matching channel count.
 	for config in configs {
 		if config.channels() == channels {
-			return Ok(config.with_max_sample_rate());
+			return Ok(config.with_sample_rate(config.min_sample_rate()));
 		}
 	}
 
