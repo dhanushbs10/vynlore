@@ -1,6 +1,6 @@
 [package]
 name = "vynlore-audio"
-version = "0.1.0"
+version = "1.1.0"
 default-run = "vynlore-audio"
 edition = "2021"
 

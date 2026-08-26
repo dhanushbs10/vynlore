@@ -236,10 +236,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const lastQueuedNextRef = useRef<string | null>(null);
     const playInFlightRef = useRef(false);
     const lastRequestedTrackRef = useRef<string>("");
-    const actionsRef = useRef<{ togglePlayPause: () => void; playNext: () => Promise<void>; playPrev: () => Promise<void> }>({
+    const actionsRef = useRef<{ togglePlayPause: () => void; playNext: () => Promise<void>; playPrev: () => Promise<void>; playTrack: (track: Track, newQueue?: Track[]) => Promise<void> }>({
         togglePlayPause: () => {},
         playNext: async () => {},
         playPrev: async () => {},
+        playTrack: async () => {},
     });
     // Monotonically increasing counter that bumps every time a new playback
     // starts.  The polling interval reads this to discard stale get_position
@@ -282,6 +283,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         let unlistenEnded: (() => void) | null = null;
         let unlistenChanged: (() => void) | null = null;
         let unlistenMedia: (() => void) | null = null;
+        let unlistenOpenFile: (() => void) | null = null;
 
         listen("playback-ended", () => {
             if (!disposed) void handlePlaybackEnded();
@@ -322,11 +324,40 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             else unlistenMedia = fn;
         });
 
+        // File association: user opened an audio file via double-click / "Open with"
+        listen<string>("open-file", (event) => {
+            if (disposed) return;
+            const filePath = event.payload;
+            if (!filePath) return;
+            const miniTrack: Track = {
+                id: -1,
+                title: filePath.split(/[/\\]/).pop() || "Unknown",
+                artist: "",
+                album: "",
+                file_path: filePath,
+                cover_path: null,
+                duration_secs: 0,
+                format: filePath.split(".").pop()?.toUpperCase() || "",
+                sample_rate: 0,
+                bit_depth: 0,
+                channels: 2,
+                track_number: 0,
+                disc_number: 0,
+                play_count: 0,
+                genre: null,
+            };
+            void actionsRef.current.playTrack(miniTrack, [miniTrack]);
+        }).then((fn) => {
+            if (disposed) fn();
+            else unlistenOpenFile = fn;
+        });
+
         return () => {
             disposed = true;
             unlistenEnded?.();
             unlistenChanged?.();
             unlistenMedia?.();
+            unlistenOpenFile?.();
         };
     }, [handlePlaybackEnded]);
 
@@ -936,7 +967,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const playNext = playNextInternal;
 
-    actionsRef.current = { togglePlayPause, playNext, playPrev };
+    actionsRef.current = { togglePlayPause, playNext, playPrev, playTrack };
 
     return (
         <PlayerContext.Provider

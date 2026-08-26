@@ -152,6 +152,20 @@ fn main() {
         }
       }
 
+      // Handle file association: if launched with an audio file path, emit it to frontend
+      let audio_exts = ["flac","wav","wave","aiff","aif","mp3","m4a","m4b","ogg","oga","opus","wma","ape","wv","dsf","dff"];
+      for arg in std::env::args().skip(1) {
+        if let Some(ext) = std::path::Path::new(&arg)
+          .extension()
+          .and_then(|e| e.to_str())
+        {
+          if audio_exts.contains(&ext.to_lowercase().as_str()) {
+            let _ = app.emit("open-file", arg);
+            break;
+          }
+        }
+      }
+
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
