@@ -215,6 +215,8 @@ pub fn start(
 			Err(e) => eprintln!("exclusive unavailable, using shared mode: {}", e),
 		}
 	}
+	#[cfg(not(windows))]
+	let use_exclusive = false;
 
 	// Shared-mode output setup (skipped entirely on the exclusive path).
 	let shared = if use_exclusive {
