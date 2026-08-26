@@ -39,7 +39,7 @@
       "icons/icon.png",
       "icons/icon.icns"
     ],
-    "targets": ["nsis"],
+    "targets": "all",
     "windows": {
       "nsis": {
         "installMode": "both",
