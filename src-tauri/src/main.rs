@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 use tauri::Emitter;
@@ -73,6 +74,23 @@ fn main() {
       let cover_dir = db_path.parent().unwrap_or(&db_path).join("covers");
       if let Err(e) = std::fs::create_dir_all(&cover_dir) {
         eprintln!("Failed to create cover dir: {}", e);
+      }
+
+      // The asset protocol scope check canonicalizes the requested path, and on
+      // Windows canonicalize produces a `\\?\` verbatim prefix that never matches
+      // the static `$APPDATA/**/*` glob in tauri.conf.json, so cover art 403s in
+      // packaged builds. Register the canonicalized cover directory in the runtime
+      // asset scope so existing cover files on disk actually resolve.
+      {
+        let scope = app.asset_protocol_scope();
+        match std::fs::canonicalize(&cover_dir) {
+          Ok(canon) => {
+            if let Err(e) = scope.allow_directory(&canon, true) {
+              eprintln!("Failed to allow cover dir in asset scope: {}", e);
+            }
+          }
+          Err(e) => eprintln!("Failed to canonicalize cover dir for asset scope: {}", e),
+        }
       }
 
       // Migrate cover art from old cache dir to new app data dir
