@@ -27,7 +27,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": ["$APPDATA/**", "$APPLOCALDATA/**", "$DOWNLOAD/**", "$MUSIC/**", "$HOME/Music/**", "$HOME/**"]
+          "allow": ["$APPDATA/**/*", "$APPLOCALDATA/**/*", "$DOWNLOAD/**/*", "$MUSIC/**/*", "$HOME/Music/**/*", "$HOME/**/*"]
         }
       }
     }
