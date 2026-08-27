@@ -86,14 +86,15 @@ pub fn get_watched_folder(app: tauri::AppHandle) -> Result<Option<String>, Strin
 pub fn set_watched_folder(path: String, app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
   write_config(&app, &AppConfig { watched_folder: Some(path.clone()) })?;
 
-  spawn_watcher(app.clone(), state.db.clone(), Path::new(&path)).map_err(|e| e.to_string())?;
+  spawn_watcher(app.clone(), state.db.clone(), Path::new(&path), &state.cover_dir).map_err(|e| e.to_string())?;
 
   let db = state.db.clone();
   let app_for_emit = app.clone();
+  let cover_dir_scan = state.cover_dir.clone();
   thread::spawn(move || {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
       if let Ok(db) = db.lock() {
-        scan_folder_internal(&db, Path::new(&path), |count| {
+        scan_folder_internal(&db, Path::new(&path), &cover_dir_scan, |count| {
           if count % 50 == 0 {
             let _ = app_for_emit.emit("watcher-event", WatcherEvent {
               title: "Scanning...".to_string(),
@@ -135,10 +136,11 @@ pub fn set_watched_folder(path: String, app: tauri::AppHandle, state: State<AppS
 #[tauri::command]
 pub fn rescan_folder(path: String, app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
   let db = state.db.clone();
+  let cover_dir_scan = state.cover_dir.clone();
   thread::spawn(move || {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
       if let Ok(db) = db.lock() {
-        scan_folder_internal(&db, Path::new(&path), |_| {})
+        scan_folder_internal(&db, Path::new(&path), &cover_dir_scan, |_| {})
       } else {
         Err("Failed to lock DB for scan".into())
       }
@@ -210,13 +212,13 @@ pub fn list_devices() -> Result<Vec<UiDevice>, String> {
 #[tauri::command]
 pub fn scan_folder(path: String, state: State<AppState>) -> Result<usize, String> {
   let db = state.db.lock().map_err(|e| e.to_string())?;
-  let count = scan_folder_internal(&db, Path::new(&path), |_| {}).map_err(|e| e.to_string())?;
+  let count = scan_folder_internal(&db, Path::new(&path), &state.cover_dir, |_| {}).map_err(|e| e.to_string())?;
   Ok(count)
 }
 
 #[tauri::command]
 pub fn start_watcher(path: String, app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
-  spawn_watcher(app, state.db.clone(), Path::new(&path)).map_err(|e| e.to_string())
+  spawn_watcher(app, state.db.clone(), Path::new(&path), &state.cover_dir).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

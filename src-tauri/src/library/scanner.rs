@@ -8,6 +8,7 @@ const BATCH_SIZE: usize = 200;
 pub fn scan_folder_with_progress<F>(
   db: &LibraryDb,
   folder_path: &std::path::Path,
+  cover_dir: &std::path::Path,
   mut on_progress: F,
 ) -> Result<usize, Box<dyn std::error::Error>>
 where
@@ -35,7 +36,7 @@ where
   for entry in entries {
     let path = entry.path();
 
-    match metadata::read_metadata(path) {
+    match metadata::read_metadata(path, cover_dir) {
       Ok(mut meta) => {
         let file_path_str = path.to_string_lossy().to_string();
 

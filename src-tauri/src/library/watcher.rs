@@ -29,6 +29,7 @@ pub fn start_watcher(
 	app: tauri::AppHandle,
 	db: Arc<Mutex<LibraryDb>>,
 	folder_path: &Path,
+	cover_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
 	let mut slot = watcher_slot().lock().unwrap_or_else(|e| e.into_inner());
 	if let Some((_, stop_flag)) = slot.take() {
@@ -38,6 +39,7 @@ pub fn start_watcher(
 	let pending: Arc<Mutex<HashMap<PathBuf, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
 	let removals: Arc<Mutex<HashMap<PathBuf, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
 	let root = folder_path.to_path_buf();
+	let cover_dir_owned = cover_dir.to_path_buf();
 
 	let cb_pending = pending.clone();
 	let cb_removals = removals.clone();
@@ -135,7 +137,7 @@ pub fn start_watcher(
 						}
 					}
 					for path in due {
-						match metadata::read_metadata(&path) {
+						match metadata::read_metadata(&path, &cover_dir_owned) {
 							Ok(mut meta) => {
 								if meta.genre.is_empty() {
 									meta.genre =

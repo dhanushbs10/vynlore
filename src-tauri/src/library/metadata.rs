@@ -86,7 +86,7 @@ pub fn format_label_for(ext: &str) -> Option<&'static str> {
     .map(|(_, label)| *label)
 }
 
-pub fn read_metadata(path: &Path) -> Result<TrackMetadata, Box<dyn std::error::Error>> {
+pub fn read_metadata(path: &Path, cover_dir: &Path) -> Result<TrackMetadata, Box<dyn std::error::Error>> {
   let tagged_file = lofty::read_from_path(path, true)?;
   let tag = match tagged_file.primary_tag() {
     Some(t) => t,
@@ -134,11 +134,8 @@ pub fn read_metadata(path: &Path) -> Result<TrackMetadata, Box<dyn std::error::E
       lofty::MimeType::Png => "png",
       _ => "jpg",
     };
-    let cache_dir = dirs::cache_dir()
-      .unwrap_or_else(|| Path::new(".").to_path_buf())
-      .join("vynlore-art");
-    fs::create_dir_all(&cache_dir)?;
-    let out_path = cache_dir.join(format!("{:016x}.{}", hash, ext));
+    fs::create_dir_all(cover_dir)?;
+    let out_path = cover_dir.join(format!("{:016x}.{}", hash, ext));
 
     let mut file = fs::File::create(&out_path)?;
     file.write_all(picture.data())?;

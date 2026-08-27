@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
@@ -13,6 +14,7 @@ pub struct AppState {
 	pub spectrum: Arc<SpectrumAnalyzer>,
 	pub balance: Arc<AtomicU32>,
 	pub preamp: Arc<AtomicU32>,
+	pub cover_dir: PathBuf,
 }
 
 // SAFETY: PlaybackHandle contains a cpal::Stream which lacks Send/Sync impls on some

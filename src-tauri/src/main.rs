@@ -69,6 +69,53 @@ fn main() {
         }
       }
       let db = LibraryDb::new(&db_path).expect("Failed to open database");
+
+      let cover_dir = db_path.parent().unwrap_or(&db_path).join("covers");
+      if let Err(e) = std::fs::create_dir_all(&cover_dir) {
+        eprintln!("Failed to create cover dir: {}", e);
+      }
+
+      // Migrate cover art from old cache dir to new app data dir
+      if let Some(old_cache) = dirs::cache_dir() {
+        let old_dir = old_cache.join("vynlore-art");
+        if old_dir.is_dir() {
+          let new_dir = cover_dir.clone();
+          match std::fs::read_dir(&old_dir) {
+            Ok(entries) => {
+              let mut moved = 0u32;
+              for entry in entries.flatten() {
+                let src = entry.path();
+                if src.is_file() {
+                  let file_name = src.file_name().unwrap();
+                  let dst = new_dir.join(file_name);
+                  if !dst.exists() {
+                    if std::fs::rename(&src, &dst).is_ok() {
+                      moved += 1;
+                    }
+                  }
+                }
+              }
+              if moved > 0 {
+                println!("Migrated {} cover art files to app data dir", moved);
+              }
+              // Update DB cover_path references from old dir to new dir
+              let old_prefix = old_dir.to_string_lossy().to_string();
+              let new_prefix = new_dir.to_string_lossy().to_string();
+              let _ = db.conn.execute(
+                "UPDATE tracks SET cover_path = REPLACE(cover_path, ?1, ?2) WHERE cover_path LIKE ?3",
+                rusqlite::params![old_prefix, new_prefix, format!("{}%", old_prefix)],
+              );
+              let _ = db.conn.execute(
+                "UPDATE playlists SET cover_path = REPLACE(cover_path, ?1, ?2) WHERE cover_path LIKE ?3",
+                rusqlite::params![old_prefix, new_prefix, format!("{}%", old_prefix)],
+              );
+              let _ = std::fs::remove_dir_all(&old_dir);
+            }
+            Err(e) => eprintln!("Failed to read old cover dir: {}", e),
+          }
+        }
+      }
+
       // Files deleted/moved while the app was off would otherwise linger as
       // unplayable ghost entries.
       match db.prune_missing_files() {
@@ -85,6 +132,7 @@ fn main() {
         spectrum: std::sync::Arc::new(crate::audio::spectrum::SpectrumAnalyzer::new()),
         balance: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
         preamp: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
+        cover_dir: cover_dir.clone(),
       };
       app.manage(state);
 
@@ -111,12 +159,13 @@ fn main() {
         let db = app.state::<AppState>().db.clone();
         let folder_path = folder.clone();
         let app_handle = app.handle().clone();
+        let cover_dir_scan = cover_dir.clone();
         let _ = std::thread::Builder::new()
           .name("vynlore-startup-scan".into())
           .spawn(move || {
           let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if let Ok(db) = db.lock() {
-              scan_folder_internal(&db, std::path::Path::new(&folder_path), |count| {
+              scan_folder_internal(&db, std::path::Path::new(&folder_path), &cover_dir_scan, |count| {
                 if count % 50 == 0 {
                   let _ = app_handle.emit("watcher-event", WatcherEvent {
                     title: "Startup scan...".to_string(),
