@@ -20,6 +20,7 @@ import { PlaylistDetailView } from "./components/views/PlaylistDetailView";
 import { HomeView } from "./components/views/HomeView";
 import PlayerBar from "./components/PlayerBar";
 import { SearchPalette } from "./components/SearchPalette";
+import { SettingsModal } from "./components/SettingsModal";
 import { Toast } from "./components/Toast";
 import type { Track, ToastMessage, AudioDevice } from "./types";
 
@@ -27,7 +28,7 @@ export type { Track };
 
 export type View = "now" | "browse" | "albums" | "artists" | "playlists" | "playlist-detail" | "genres" | "genre-detail" | "album-detail" | "artist-detail";
 
-type WatcherPayload = { title: string; artist: string; count: number };
+type WatcherPayload = { title: string; artist: string; count: number; total?: number | null };
 
 function AppInner() {
   const [currentView, setCurrentView] = useState<View>("now");
@@ -42,6 +43,8 @@ function AppInner() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [tauriReady, setTauriReady] = useState(isTauri());
   const [watchedFolder, setWatchedFolder] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<{ scanned: number; total: number | null } | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const {
@@ -50,7 +53,7 @@ function AppInner() {
     libraryTracks,
     displayedTracks,
     setLibraryTracks,
-    setDisplayedTracks,
+    setQueueToLibrary,
     playTrack,
     togglePlayPause,
     seekTime,
@@ -105,13 +108,36 @@ function AppInner() {
 
   const loadTracks = useCallback(async () => {
     try {
+      // Only refreshes the displayed queue when it still mirrors the library.
+      // A scan / watcher refresh must never clobber a user-built queue.
       const t = await invoke<Track[]>("get_tracks");
       setLibraryTracks(t);
-      setDisplayedTracks(t);
     } catch (err) {
       console.error("failed to load library", err);
     }
-  }, [setLibraryTracks, setDisplayedTracks]);
+  }, [setLibraryTracks]);
+
+  const pushToast = useCallback((title: string, subtitle?: string) => {
+    setToasts((prev) => [...prev, { id: Date.now() + Math.random(), title, subtitle: subtitle ?? "" }]);
+  }, []);
+
+  // While a scan is streaming in, reload the library on a cooldown instead of
+  // hammering get_tracks on every progress event.
+  const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleIncrementalLoad = useCallback(() => {
+    if (loadTimerRef.current) return;
+    loadTimerRef.current = setTimeout(() => {
+      loadTimerRef.current = null;
+      void loadTracks();
+    }, 350);
+  }, [loadTracks]);
+
+  useEffect(
+    () => () => {
+      if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!tauriReady) return;
@@ -159,16 +185,37 @@ function AppInner() {
     const setup = async () => {
       try {
         const fn = await listen<WatcherPayload>("watcher-event", (event) => {
-          const { title, count } = event.payload;
-          if (!/^removed$/i.test(title)) {
-            const id = Date.now() + Math.random();
-            setToasts((prev) => [...prev, { id, title, subtitle: `${count} new track${count > 1 ? "s" : ""}` }]);
+          const { title, count, total } = event.payload;
+
+          // Scan lifecycle events stream progress from the backend scanner.
+          if (/scan/i.test(title)) {
+            setScanning(true);
+            setScanProgress({ scanned: count, total: total ?? null });
+            if (/complete|failed/i.test(title)) {
+              setScanning(false);
+              setScanProgress(null);
+              if (loadTimerRef.current) {
+                clearTimeout(loadTimerRef.current);
+                loadTimerRef.current = null;
+              }
+              void loadTracks();
+              if (/failed/i.test(title)) {
+                pushToast("Scan failed", "Make sure the music folder is still accessible.");
+              }
+            } else if (count > 0) {
+              // Keep the library view filling in while the scan runs — the
+              // backend only locks the DB briefly per batch now, so these
+              // reads return immediately instead of freezing the app.
+              scheduleIncrementalLoad();
+            }
+            return;
           }
-          if (/complete|failed/i.test(title)) {
-            setScanning(false);
-          }
+
           if (count > 0) {
-            loadTracks();
+            if (!/^removed$/i.test(title)) {
+              pushToast(title, `${count} new track${count > 1 ? "s" : ""}`);
+            }
+            void loadTracks();
           }
         });
         if (disposed) { fn(); return; }
@@ -183,7 +230,7 @@ function AppInner() {
       disposed = true;
       unlisten?.();
     };
-  }, [loadTracks]);
+  }, [loadTracks, scheduleIncrementalLoad, pushToast]);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -204,19 +251,21 @@ function AppInner() {
 
   const handleRescan = useCallback(async () => {
     if (!watchedFolder || scanning) return;
-    setScanning(true);
     try {
       await invoke("rescan_folder", { path: watchedFolder });
     } catch (err) {
       console.error("Rescan failed:", err);
-    } finally {
       setScanning(false);
+      setScanProgress(null);
     }
   }, [watchedFolder, scanning]);
 
   useEffect(() => {
     if (!scanning) return;
-    const timer = setTimeout(() => setScanning(false), 120_000);
+    const timer = setTimeout(() => {
+      setScanning(false);
+      setScanProgress(null);
+    }, 600_000);
     return () => clearTimeout(timer);
   }, [scanning]);
 
@@ -234,11 +283,12 @@ function AppInner() {
       setSelectedArtist(null);
       setSelectedGenre(null);
       setSelectedPlaylist(null);
-      setDisplayedTracks(libraryTracks);
+      // Navigating back to a browse view restores the default (library) queue.
+      setQueueToLibrary();
       setShowFullNow(false);
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     },
-    [libraryTracks],
+    [setQueueToLibrary],
   );
 
   const handleAlbumClick = useCallback((album: string) => {
@@ -293,9 +343,11 @@ function AppInner() {
         currentView={currentView}
         onNavClick={handleNav}
         scanning={scanning}
+        scanProgress={scanProgress}
         hasFolder={!!watchedFolder}
         onOpenSearch={() => setShowSearch(true)}
         onToggleEq={() => setShowEq((v) => !v)}
+        onOpenSettings={() => setShowSettings(true)}
         devices={devices}
         selectedDevice={selectedDevice}
         onSelectDevice={setSelectedDevice}
@@ -319,6 +371,7 @@ function AppInner() {
                   watchedFolder={watchedFolder}
                   onSelectFolder={handleAddFolder}
                   scanning={scanning}
+                  scanProgress={scanProgress}
                 />
               )}
               {currentView === "browse" && (
@@ -379,6 +432,15 @@ function AppInner() {
         playTrack={playTrack}
       />
       <EqPanel open={showEq} onClose={() => setShowEq(false)} />
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        watchedFolder={watchedFolder}
+        scanning={scanning}
+        scanProgress={scanProgress}
+        onSelectFolder={handleAddFolder}
+        onRescan={handleRescan}
+      />
       <PlayerBar onExpandCurrentTrack={() => setShowFullNow(true)} />
       {showSearch && (
         <SearchPalette

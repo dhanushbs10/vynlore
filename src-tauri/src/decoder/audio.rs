@@ -87,10 +87,15 @@ pub fn decode_packet(decoder: &mut AudioFileDecoder) -> Option<Vec<f32>> {
 
 		match decoder.decoder.decode(&packet) {
 			Ok(audio_buf_ref) => {
-				if decoder.sample_buf.is_none() {
-					let spec = *audio_buf_ref.spec();
-					let duration = audio_buf_ref.capacity() as u64;
-					decoder.sample_buf = Some(SampleBuffer::<f32>::new(duration, spec));
+				let spec = *audio_buf_ref.spec();
+				// (Re)allocate the reusable interleave buffer whenever the
+				// decoded packet needs more room than the current one — a
+				// SampleBuffer sized from the first packet silently truncates
+				// later, larger packets (audible ticks/static on some files).
+				let needs = audio_buf_ref.frames() as u64;
+				match decoder.sample_buf.as_ref() {
+					Some(existing) if existing.capacity() as u64 >= needs => {}
+					_ => decoder.sample_buf = Some(SampleBuffer::<f32>::new(needs, spec)),
 				}
 
 				if let Some(sample_buf) = decoder.sample_buf.as_mut() {

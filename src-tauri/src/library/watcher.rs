@@ -13,9 +13,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Clone, serde::Serialize)]
 pub struct WatcherEvent {
-	pub title: String,
-	pub artist: String,
-	pub count: usize,
+    pub title: String,
+    pub artist: String,
+    pub count: usize,
+    #[serde(default)]
+    pub total: Option<usize>,
 }
 
 fn watcher_slot() -> &'static Mutex<Option<(RecommendedWatcher, Arc<std::sync::atomic::AtomicBool>)>> {
@@ -176,11 +178,12 @@ pub fn start_watcher(
 					let titles: Vec<String> = added.into_iter().map(|(t, _)| t).collect();
 					let _ = app_for_worker.emit(
 						"watcher-event",
-						WatcherEvent {
-							title: titles.join(", "),
-							artist: root.to_string_lossy().to_string(),
-							count,
-						},
+WatcherEvent {
+                            title: titles.join(", "),
+                            artist: root.to_string_lossy().to_string(),
+                            count,
+                            total: None,
+                        },
 					);
 				}
 
@@ -188,11 +191,12 @@ pub fn start_watcher(
 					// Frontend treats "removed" specially: refresh, no toast.
 					let _ = app_for_worker.emit(
 						"watcher-event",
-						WatcherEvent {
-							title: "removed".to_string(),
-							artist: root.to_string_lossy().to_string(),
-							count: removed_count,
-						},
+WatcherEvent {
+                            title: "removed".to_string(),
+                            artist: root.to_string_lossy().to_string(),
+                            count: removed_count,
+                            total: None,
+                        },
 					);
 				}
 			}

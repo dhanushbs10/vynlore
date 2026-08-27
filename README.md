@@ -2,7 +2,7 @@
 
 A lossless-first desktop music player built with Tauri v2, React, and Rust.
 
-Vynlore is a local music player designed for audiophiles who care about playback quality. It decodes all major formats natively in Rust, outputs through WASAPI exclusive mode for bit-perfect delivery, and ships with a 10-band parametric equalizer with genre-aware presets.
+Vynlore is a local music player designed for audiophiles who care about playback quality. It decodes all major formats natively in Rust, outputs through WASAPI exclusive mode for bit-perfect delivery, and ships with a multi-band parametric equalizer with genre-aware presets.
 
 ## Download
 
@@ -20,9 +20,9 @@ After installing on Windows, go to **Settings > Apps > Default Apps** and set Vy
 
 ### Playback
 
-- Gapless playback with crossfade
+- Gapless playback
 - WASAPI exclusive mode for bit-perfect output
-- Multi-format decoding: FLAC, WAV, AIFF, MP3, M4A, OGG, WMA, APE, WavPack, DSD (DSF/DFF)
+- Multi-format decoding: FLAC, WAV, AIFF, MP3, M4A, OGG
 - Real-time spectrum analyzer
 - Waveform seekbar with RMS visualization
 
@@ -36,7 +36,7 @@ After installing on Windows, go to **Settings > Apps > Default Apps** and set Vy
 
 ### Audio
 
-- 10-band parametric equalizer with adjustable Q
+- 10-band parametric equalizer with adjustable Q (5–32 bands)
 - Bass and treble shelf filters
 - Preamp gain control
 - Auto-EQ: parse AutoEq profile text files and apply correction curves
@@ -56,7 +56,7 @@ After installing on Windows, go to **Settings > Apps > Default Apps** and set Vy
 ## Tech Stack
 
 - **Backend:** Rust (Tauri v2, Symphonia, CPAL, WASAPI)
-- **Frontend:** React 19, TypeScript, Tailwind CSS v4, Vite
+- **Frontend:** React 18, TypeScript, Tailwind CSS v4, Vite
 - **Audio Engine:** Custom Rust decoder with Symphonia, CPAL output, real-time EQ via biquad filters
 
 ## Development
@@ -95,14 +95,10 @@ The installer will be in `src-tauri/target/release/bundle/`.
 |--------|-----------|------|
 | FLAC | `.flac` | Lossless |
 | WAV | `.wav`, `.wave` | Lossless |
-| AIFF | `.aiff`, `.aif` | Lossless |
+| AIFF | `.aiff`, `.aif`, `.aifc` | Lossless |
 | MP3 | `.mp3` | Lossy |
 | M4A | `.m4a`, `.m4b` | Lossy |
-| OGG | `.ogg`, `.oga`, `.opus` | Lossy |
-| WMA | `.wma` | Lossy |
-| APE | `.ape` | Lossless |
-| WavPack | `.wv` | Lossless |
-| DSD | `.dsf`, `.dff` | Lossless |
+| OGG | `.ogg`, `.oga` | Lossy |
 
 ## License
 

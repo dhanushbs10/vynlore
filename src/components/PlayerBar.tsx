@@ -115,10 +115,10 @@ const formatLabel = currentTrack
 : "";
 
 return (
-<div className="fixed bottom-0 left-0 right-0 h-[92px] bg-black/70 backdrop-blur-xl border-t border-border z-[100]">
+<div className="fixed bottom-0 left-0 right-0 h-[92px] bg-black-70 backdrop-blur-xl border-t border-border z-[100]">
   <div className="absolute top-0 left-0 right-0 h-4 cursor-pointer group z-[2]" onClick={handleSeek}>
       <div className="absolute top-0 left-0 right-0 h-[6px]">
-      <div className="absolute inset-0 bg-white/[0.08]" />
+      <div className="absolute inset-0 bg-white-8" />
       <div className="absolute top-0 left-0 bottom-0 bg-white rounded-r pointer-events-none" style={{ width: `${pct}%` }} />
       <div className="absolute top-1/2 w-3 h-3 bg-white rounded-full -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" style={{ left: `${pct}%` }} />
     </div>
@@ -162,7 +162,7 @@ return (
             <ListPlus size={15} />
           </button>
             {showPlaylistDropdown && (
-              <div className="absolute bottom-full right-0 mb-2 bg-bg-raised border border-border rounded-md p-1 min-w-[160px] z-[1000] shadow-lg shadow-black/50">
+              <div className="absolute bottom-full right-0 mb-2 bg-bg-raised border border-border rounded-md p-1 min-w-[160px] z-[1000] shadow-lg shadow-black-50">
                 {playlists.map((p) => (
                   <div
                     key={p.id}
@@ -262,13 +262,13 @@ return (
     </div>
   </div>
   {showExclWarning && createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60" onClick={() => setShowExclWarning(false)}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black-60" onClick={() => setShowExclWarning(false)}>
       <div
-        className="bg-[#141414] border border-border rounded-lg p-6 max-w-sm w-full mx-4"
+        className="bg-bg-surface border border-border rounded-lg p-6 max-w-sm w-full mx-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-lg bg-white-10 flex items-center justify-center">
             <Zap size={20} className="text-white" />
           </div>
           <h2 className="font-display text-lg font-bold text-text">Exclusive Mode</h2>

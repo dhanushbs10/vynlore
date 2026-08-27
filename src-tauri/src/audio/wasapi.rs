@@ -22,6 +22,9 @@ use windows::Win32::Media::KernelStreaming::WAVE_FORMAT_EXTENSIBLE;
 use windows::Win32::System::Com::{
 	CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
+use windows::Win32::System::Threading::{
+	GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
+};
 
 use crate::audio::player::ControlBlock;
 use crate::audio::queue::SampleQueue;
@@ -196,9 +199,11 @@ unsafe fn acquire_session(
 		.map_err(|e| format!("GetDevicePeriod: {}", e))?;
 	let _ = min_period;
 
-	// ~10x device period of buffering keeps the poll loop lazy without
-	// audible latency on an output-only path.
-	let buffer_duration = default_period * 10;
+	// ~25x device period (~250ms) of buffering: enough headroom to absorb a
+	// slow decoder hiccup (cold seek, file open) without starving the device
+	// clock into a silent-frame dropout, on an output-only path latency is
+	// irrelevant so the deeper buffer is strictly safer for bit-exactness.
+	let buffer_duration = default_period * 25;
 
 	let mut init = client.Initialize(
 		AUDCLNT_SHAREMODE_EXCLUSIVE,
@@ -422,6 +427,9 @@ unsafe fn run_render_loop(
 	stop_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
 	let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+	// Render thread slightly above normal so scheduling jitter can't leave the
+	// device buffer unfed; the loop still sleeps the bulk of its time.
+	let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL) };
 
 	let ch = fmt.channels as usize;
 	let container_bits: u16 = if fmt.valid_bits <= 16 { 16 } else { 32 };
@@ -530,21 +538,9 @@ unsafe fn run_render_loop(
 				true,
 			)?;
 			// Push raw (pre-volume) samples to spectrum so the visualizer
-			// isn't double-gained by the volume/balance adjustment below.
+			// isn't double-gained by the volume/balance adjustment inside
+			// write_samples.
 			spectrum.push_samples(&scratch[..frames_written * ch]);
-			let vol = f32::from_bits(volume_bits.load(Ordering::Relaxed));
-			let bal = f32::from_bits(balance_bits.load(Ordering::Relaxed));
-			let lg = if bal > 0.01 { 1.0 - bal } else { 1.0 };
-			let rg = if bal < -0.01 { 1.0 + bal } else { 1.0 };
-			for chunk in scratch[..frames_written * ch].chunks_exact_mut(ch) {
-				chunk[0] *= lg * vol;
-				if ch >= 2 {
-					chunk[1] *= rg * vol;
-				}
-				for s in chunk[2..].iter_mut() {
-					*s *= vol;
-				}
-			}
 			written_total += frames_written as u64;
 		}
 
@@ -562,6 +558,15 @@ unsafe fn run_render_loop(
 
 		std::thread::sleep(service_sleep);
 	}
+
+	eprintln!(
+		"exclusive session end: {}s runtime, {} frames written, {} starve tick{}, {} underruns",
+		loop_start.elapsed().as_secs(),
+		written_total,
+		starve_ticks,
+		if starve_ticks == 1 { "" } else { "s" },
+		control.underruns.load(Ordering::Relaxed),
+	);
 
 	let _ = client.Stop();
 	CoUninitialize();
@@ -595,6 +600,8 @@ pub fn run_diagnostic_sine() {
 		pending_change: AtomicBool::new(false),
 		next_file: std::sync::Mutex::new(None),
 		current_file: std::sync::Mutex::new(std::path::PathBuf::from("sine")),
+		replaygain: Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
+		pending_rg_gain: Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
 	});
 	let volume_bits = Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
 	let spectrum = Arc::new(SpectrumAnalyzer::new());

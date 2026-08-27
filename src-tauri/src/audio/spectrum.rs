@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use serde::Serialize;
 
 /// 64-bin spectrum analyzer. Thread-safe via interior mutability.
@@ -8,6 +9,8 @@ pub struct SpectrumAnalyzer {
     /// 64 magnitudes (0.0..1.0), updated every emit cycle.
     bins: Mutex<[f32; 64]>,
     channels: Mutex<usize>,
+    /// Timestamp of the most recent push, used to detect idle playback.
+    last_push: Mutex<Option<Instant>>,
     /// Reusable buffers for compute() to avoid per-cycle allocation.
     snapshot: Mutex<Vec<f32>>,
     mono: Mutex<Vec<f64>>,
@@ -27,6 +30,7 @@ impl SpectrumAnalyzer {
             ring: Mutex::new(VecDeque::with_capacity(4096)),
             bins: Mutex::new([0.0f32; 64]),
             channels: Mutex::new(2),
+            last_push: Mutex::new(None),
             snapshot: Mutex::new(Vec::with_capacity(2048)),
             mono: Mutex::new(Vec::with_capacity(2048)),
             windowed: Mutex::new(Vec::with_capacity(2048)),
@@ -41,10 +45,20 @@ impl SpectrumAnalyzer {
         }
     }
 
+    /// Whether samples have reached the analyzer recently (i.e. playback is
+    /// actually producing audio). Lets the emitter thread go quiet when idle.
+    pub fn is_active(&self) -> bool {
+        self.last_push
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map_or(false, |t| t.elapsed() < Duration::from_millis(250))
+    }
+
     /// Push interleaved f32 samples from the output callback.
     /// Only the most recent 2048 samples are kept for FFT.
     pub fn push_samples(&self, samples: &[f32]) {
         let mut ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
+        *self.last_push.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
         for &s in samples {
             ring.push_back(s);
         }

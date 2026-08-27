@@ -15,7 +15,7 @@ User's Music Folder
 Rust Backend  ── Tauri IPC/events ──>  React Frontend
   |                                        |
   +-- Lofty       reads tags               +-- React 18 + TypeScript (strict)
-  +-- notify      watches folder changes   +-- Plain-CSS design system (variables.css)
+  +-- notify      watches folder changes   +-- Tailwind CSS v4 design tokens (index.css)
   +-- walkdir     recursive scanning       +-- PlayerContext (single playback store)
   +-- rusqlite    library DB (WAL)         +-- invoke() commands / listen() events
    +-- Symphonia   decodes any supported container -> f32
@@ -33,7 +33,7 @@ SQLite (library.db in OS app-data dir)      Speakers / Audio Device
 Tauri uses the OS webview (**WebView2** on Windows). The React app calls `invoke("command", args)`; Rust `#[tauri::command]` fns return `Result<T, String>`, serialized back as JSON Promises. Backend → frontend push happens through named events (`watcher-event`, `playback-ended`) via `listen()`.
 
 - **Entry point:** `src-tauri/src/main.rs` — builds the Tauri app, opens the DB, manages `AppState`, registers all commands, runs the startup scan + watcher if a watched folder is configured.
-- **Config:** `src-tauri/tauri.conf.json` — window 1200×800 "Vynlore", dev port 1420, asset protocol enabled (for cover art via `convertFileSrc`).
+- **Config:** `src-tauri/tauri.conf.json` — window 1280×800 "Vynlore", dev port 1420, locked-down asset protocol for cover art (`$APPDATA`/`$APPLOCALDATA`/`$DOWNLOAD`/`$MUSIC`/`$HOME/Music` only).
 
 ---
 
@@ -92,7 +92,7 @@ Position tracking is frame-exact across seams: position = (`frames_played` − `
 - Loop: check stop/pause/seek control flags each packet.
 - Decode one frame → interleaved `Vec<f32>` (Symphonia's `SampleBuffer<f32>` already normalizes to −1..1 for any bit depth — no manual rescaling). The decoder layer (`decoder/audio.rs`) is container-agnostic: `open_audio`/`decode_packet`/`seek` work identically for lossless and lossy inputs, which also means gapless chaining works across formats when channel counts match (e.g. FLAC → WAV).
 - If file rate ≠ output rate, feed **rubato** `SincFixedIn<f32>` (sinc_len 256, Blackman-Harris² window, cubic interpolation, 1024-frame input chunks). Resampling happens here, off the RT thread. At EOF, `process_partial(None)` flushes the resampler tail so the last samples aren't dropped.
-- **Equalizer (`audio/eq.rs`)**: after resampling, before the queue push (both in `pump()` and the EOF tail flush), a 10-band graphic EQ is applied on this same decoder thread — never the RT thread. RBJ-cookbook biquads (low-shelf → peaking ×8, Q = 1.1 → high-shelf) at 31 Hz … 16 kHz, Direct Form I, ±12 dB. `SharedEq` (`Arc<Mutex<EqSettings>>`) lives on `AppState`, so `update_eq` mutates settings live; each `Pipeline`'s `EqProcessor` caches coefficients keyed by (output rate, gains snapshot) and clears filter state when disabled/neutral or on seek.
+- **Equalizer (`audio/eq.rs`)**: after resampling, before the queue push (both in `pump()` and the EOF tail flush), a multi-band graphic EQ (5–32 bands, RBJ-cookbook biquads — low-shelf → peaking ×N → high-shelf, adjustable Q, Direct Form I, ±12 dB) is applied on this same decoder thread — never the RT thread. `SharedEq` (`Arc<Mutex<EqSettings>>`) lives on `AppState`, so `update_eq` mutates settings live; each `Pipeline`'s `EqProcessor` caches coefficients keyed by (output rate, gains snapshot) and clears filter state when disabled/neutral or on seek.
 - Push into the `SampleQueue`; when drained at EOF, emit `playback-ended` exactly once (guarded by an atomic flag).
 - Seek path: set `seek_to` on the control block → decoder performs an accurate Symphonia seek, calls `resampler.reset()`, clears the queue.
 
@@ -122,17 +122,20 @@ Thin cpal wrapper: `start(config, device, callback)` and `select_device_by_numbe
 | `get_position` | Current position in seconds (frame-exact across gapless seams) |
 | `queue_next_track(nextPath?)` | Arms/clears the gapless next-track slot |
 | `set_volume(volume)` | 0.0–1.0 → f32 bits into the atomic |
-| `update_eq(enabled, gains[10])` | Live EQ: enable flag + per-band gains (clamped ±12 dB) into `AppState.eq`; pipelines pick it up on the next decoder chunk |
-| `create_playlist(name)` | New playlist |
+| `update_eq(enabled, gains, qs, bandHz)` | Live EQ: enable flag + dynamic band gains, Q values, and center frequencies (validated) into `AppState.eq`; pipelines pick it up on the next decoder chunk |
+| `toggle_like_track(trackId)` | Add/remove in the protected "Liked Songs" playlist |
+| `is_track_liked(trackId)` | Like state |
+| `delete_playlist(playlistId)` | Deletes (refuses "Liked Songs") |
+| `create_playlist(name)` | New playlist (refuses the protected "Liked Songs" name) |
+| `rename_playlist(playlistId, name)` | Renames a playlist |
 | `get_playlists` | Playlists with track counts |
 | `add_track_to_playlist(playlistId, trackId)` | Append (dedup-safe, `INSERT OR IGNORE`) |
 | `remove_track_from_playlist(playlistId, trackId)` | Remove |
 | `get_playlist_tracks(playlistId)` | Full track rows in position order |
 | `get_playlist_name(playlistId)` | Playlist title |
-| `toggle_like_track(trackId)` | Add/remove in the protected "Liked Songs" playlist |
-| `is_track_liked(trackId)` | Like state |
-| `delete_playlist(playlistId)` | Deletes (refuses "Liked Songs") |
-| `queue_next_track(nextPath?)` | Arms/clears the gapless next-track slot |
+| `get_waveform(filePath)` | Cached per-file RMS peak data for the waveform seekbar |
+| `read_text_file(path)` | Reads a text file (lyrics) safely — only under allowed roots |
+| `add_external_track(filePath)` | Registers a file opened via the `open-file` association as a real library track |
 | `increment_play_count(filePath)` | Bumps play_count/last_played (called on every track start, incl. gapless chains) |
 | `get_recently_played(limit?)` | Tracks ordered by last_played desc |
 
@@ -173,7 +176,7 @@ Small `AudioError` enum (`DecodingError`, `OutputError`, `FileError`, `ConfigErr
 
 ### 3a. Tooling & Styling
 
-Vite 5 + TypeScript 5 (strict). Styling is a hand-rolled dark design system in plain CSS (`src/styles/variables.css` tokens: `--bg-deep/base/raised/hover`, `--accent #6cb4ee`, `--accent-warm #d4a373`, text tiers, radii) — no Tailwind, no component library. Icons: lucide-react.
+Vite 5 + TypeScript 5 (strict). Styling is Tailwind CSS v4 with the custom dark design system defined as `@theme` tokens in `src/index.css` (`--color-bg*`, `--color-text*`, `--font-*`, radii) — no component library. Icons: lucide-react.
 
 ### 3b. State Management (`context/PlayerContext.tsx`)
 
@@ -256,6 +259,6 @@ Release profile: `opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "a
 - Opus decode (Symphonia 0.5 demuxes .opus but has no codec; excluded from scanning)
 - Gapless is same-channel-count only (mismatched layouts take the clean restart path)
 - Exclusive mode is format-gated per device (e.g. a 48 kHz-only endpoint refuses 44.1 kHz files → silent shared fallback); no automatic rate-matching retry
-- No replay-gain / loudness normalization yet (the 10-band EQ shipped; auto-genre preset matching included)
+- No replay-gain / loudness normalization yet (the multi-band EQ shipped; auto-genre preset matching included)
 - No play-count analytics beyond Recently Played (no top-charts/stats view)
 - Single-window UI; no mini-player

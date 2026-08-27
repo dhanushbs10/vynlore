@@ -90,7 +90,7 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
           <div className="text-[22px] font-bold text-text">{artist}</div>
           <div className="flex gap-2.5">
             <motion.button
-              className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white/5 hover:text-text transition-colors w-auto"
+              className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white-5 hover:text-text transition-colors w-auto"
               onClick={handleShuffle}
               whileTap={{ scale: 0.95 }}
               aria-label="Shuffle artist"
@@ -158,7 +158,7 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
                     return (
                       <div
                         key={track.id}
-                        className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${active ? "bg-white/5" : ""}`}
+                        className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white-5 transition-colors ${active ? "bg-white-5" : ""}`}
                         onClick={() => playTrack(track, artistTracks)}
                       >
                         <div className="w-12">

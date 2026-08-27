@@ -12,6 +12,7 @@ interface HomeViewProps {
   watchedFolder: string | null;
   onSelectFolder: () => void;
   scanning?: boolean;
+  scanProgress?: { scanned: number; total: number | null } | null;
 }
 
 function buildSuggestions(recent: Track[], library: Track[]) {
@@ -77,7 +78,7 @@ function buildSuggestions(recent: Track[], library: Track[]) {
   return suggestions;
 }
 
-export function HomeView({ libraryTracks, recentlyPlayed = [], playTrack, onExpandTrack, watchedFolder, onSelectFolder, scanning }: HomeViewProps) {
+export function HomeView({ libraryTracks, recentlyPlayed = [], playTrack, onExpandTrack, watchedFolder, onSelectFolder, scanning, scanProgress }: HomeViewProps) {
   const recentlyAdded = useMemo(() => {
     return [...libraryTracks].sort((a, b) => b.id - a.id).slice(0, 20);
   }, [libraryTracks]);
@@ -108,9 +109,15 @@ export function HomeView({ libraryTracks, recentlyPlayed = [], playTrack, onExpa
     return (
       <div>
         <div className="text-center pt-32 pb-16 text-text-muted">
-          <div className="text-base font-semibold text-text-secondary">{scanning ? "Scanning your library…" : "Library is empty"}</div>
+          <div className="text-base font-semibold text-text-secondary">
+            {scanning
+              ? scanProgress
+                ? `Scanning your library… ${scanProgress.scanned.toLocaleString()}${scanProgress.total ? ` / ${scanProgress.total.toLocaleString()}` : ""}`
+                : "Scanning your library…"
+              : "Library is empty"}
+          </div>
           <div className="text-sm mt-1">
-            {scanning ? "This may take a moment for large folders." : "Add audio files (FLAC, WAV, AIFF, MP3, M4A, OGG) to your watched folder to see them here."}
+            {scanning ? "Your music is being added as it's found — the app stays usable during the scan." : "Add audio files (FLAC, WAV, AIFF, MP3, M4A, OGG) to your watched folder to see them here."}
           </div>
         </div>
       </div>
@@ -125,7 +132,10 @@ export function HomeView({ libraryTracks, recentlyPlayed = [], playTrack, onExpa
           <p className="text-sm text-text-secondary mt-1">{recentlyPlayed.length > 0 ? "Your music, made for you" : "Recently Added"}</p>
         </div>
         {scanning && (
-          <div className="text-xs text-white font-medium">Scanning…</div>
+          <div className="text-xs text-white font-medium">
+            Scanning…
+            {scanProgress && ` ${scanProgress.scanned.toLocaleString()}${scanProgress.total ? ` / ${scanProgress.total.toLocaleString()}` : ""}`}
+          </div>
         )}
       </div>
 
@@ -196,7 +206,7 @@ function HorizontalCard({
           <div className="w-[150px] h-[150px] bg-bg-surface rounded-md" />
         )}
         <button
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 scale-0 opacity-0 group-hover:scale-100 group-hover:opacity-100 transition-all duration-150 w-11 h-11 rounded-full bg-white/90 text-black flex items-center justify-center"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 scale-0 opacity-0 group-hover:scale-100 group-hover:opacity-100 transition-all duration-150 w-11 h-11 rounded-full bg-white-90 text-black flex items-center justify-center"
           onClick={(e) => {
             e.stopPropagation();
             playTrack(track, queue);
@@ -206,7 +216,7 @@ function HorizontalCard({
           <Play size={22} fill="currentColor" />
         </button>
         <button
-          className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 flex items-center justify-center cursor-pointer text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+          className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black-50 flex items-center justify-center cursor-pointer text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150"
           onClick={(e) => {
             e.stopPropagation();
             onExpandTrack(track, queue);
@@ -247,7 +257,7 @@ function TrackCard({
           <div className="w-full aspect-square bg-bg-surface rounded-md" />
         )}
         <button
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 scale-0 opacity-0 group-hover:scale-100 group-hover:opacity-100 transition-all duration-150 w-11 h-11 rounded-full bg-white/90 text-black flex items-center justify-center"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 scale-0 opacity-0 group-hover:scale-100 group-hover:opacity-100 transition-all duration-150 w-11 h-11 rounded-full bg-white-90 text-black flex items-center justify-center"
           onClick={(e) => {
             e.stopPropagation();
             playTrack(track, queue);
@@ -257,7 +267,7 @@ function TrackCard({
           <Play size={22} fill="currentColor" />
         </button>
         <button
-          className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 flex items-center justify-center cursor-pointer text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+          className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black-50 flex items-center justify-center cursor-pointer text-white opacity-0 group-hover:opacity-100 transition-opacity duration-150"
           onClick={(e) => {
             e.stopPropagation();
             onExpandTrack(track, queue);

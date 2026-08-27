@@ -13,6 +13,8 @@ import {
   EQ_MAX_BOOST,
   EQ_PRESETS,
   BAND_COUNT_PRESETS,
+  MIN_BAND_COUNT,
+  MAX_BAND_COUNT,
 } from "../audio/eqPresets";
 import { parseAutoEq, autoEqToVynlore } from "../audio/autoeq";
 
@@ -143,7 +145,7 @@ const VFader: React.FC<VFaderProps> = ({
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
   }, [computeValue, disabled]);
 
-  const fillColor = color ?? "#ffffff";
+  const fillColor = color ?? "var(--color-white)";
 
   return (
     <div
@@ -157,14 +159,14 @@ const VFader: React.FC<VFaderProps> = ({
     >
       {/* Track groove */}
       <div className="absolute top-1 bottom-1 left-1/2 -translate-x-1/2 rounded-full"
-        style={{ width: 3, background: "rgba(255,255,255,0.05)" }} />
+        style={{ width: 3, background: "color-mix(in srgb, var(--color-white) 5%, transparent)" }} />
       {/* Fill */}
       <div className="absolute left-1/2 -translate-x-1/2 rounded-full pointer-events-none transition-all duration-75"
         style={{
           width: 3,
           top: `${100 - clampedPct}%`,
           bottom: "0%",
-          background: `linear-gradient(to top, ${fillColor}33, ${fillColor}bb)`,
+          background: `linear-gradient(to top, color-mix(in srgb, ${fillColor} 20%, transparent), color-mix(in srgb, ${fillColor} 73%, transparent))`,
         }} />
       {/* Thumb */}
       <div className="absolute left-1/2 -translate-x-1/2 rounded-sm pointer-events-none transition-all duration-75"
@@ -172,7 +174,7 @@ const VFader: React.FC<VFaderProps> = ({
           width: width - 4,
           height: 7,
           top: `calc(${100 - clampedPct}% - 3.5px)`,
-          background: disabled ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.7)",
+          background: disabled ? "color-mix(in srgb, var(--color-white) 15%, transparent)" : "color-mix(in srgb, var(--color-white) 70%, transparent)",
           boxShadow: "none",
         }} />
     </div>
@@ -239,6 +241,14 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
         setImportError("No EQ bands found");
         return;
       }
+      if (result.bands.length < MIN_BAND_COUNT || result.bands.length > MAX_BAND_COUNT) {
+        // setEqFreqs would silently reject out-of-range counts — surface it
+        // instead of leaving the user believing the import worked.
+        setImportError(
+          `Unsupported band count: ${result.bands.length}. Flatten the AutoEQ points to ${MIN_BAND_COUNT}–${MAX_BAND_COUNT} to import.`
+        );
+        return;
+      }
       const { gains, qs, bandHz } = autoEqToVynlore(result);
       setEqFreqs(bandHz);
       if (!eqParametric) toggleEqParametric();
@@ -283,41 +293,41 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
           className="fixed inset-0 z-[500] flex flex-col bg-bg"
         >
           {/* ═══ TOP BAR ═══ */}
-          <div className="h-11 shrink-0 flex items-center justify-between px-5 border-b border-white/[0.06]">
+          <div className="h-11 shrink-0 flex items-center justify-between px-5 border-b border-white-6">
             <div className="flex items-center gap-3">
-              <button onClick={onClose} className="w-7 h-7 rounded-md flex items-center justify-center text-white/30 hover:text-white hover:bg-white/[0.06] transition-all cursor-pointer">
+              <button onClick={onClose} className="w-7 h-7 rounded-md flex items-center justify-center text-white-30 hover:text-white hover:bg-white-6 transition-all cursor-pointer">
                 <X size={16} />
               </button>
-              <div className="h-4 w-px bg-white/[0.07]" />
-              <h2 className="text-[11px] font-bold text-white/50 tracking-[0.2em] uppercase font-display">Equalizer</h2>
+              <div className="h-4 w-px bg-white-7" />
+              <h2 className="text-[11px] font-bold text-white-75 tracking-[0.2em] uppercase font-display">Equalizer</h2>
               <div className="flex items-center gap-1.5 ml-1">
-                <div className={`w-1.5 h-1.5 rounded-full transition-all ${eqEnabled ? "bg-white" : "bg-white/10"}`} />
-                <span className={`text-[9px] font-bold tracking-wider ${eqEnabled ? "text-white/70" : "text-white/15"}`}>{eqEnabled ? "ON" : "OFF"}</span>
+                <div className={`w-1.5 h-1.5 rounded-full transition-all ${eqEnabled ? "bg-white" : "bg-white-10"}`} />
+                <span className={`text-[9px] font-bold tracking-wider ${eqEnabled ? "text-white-70" : "text-white-40"}`}>{eqEnabled ? "ON" : "OFF"}</span>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={handleAutoEqImport}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-medium border border-white/[0.07] bg-white/[0.02] text-white/35 hover:text-white/60 hover:border-white/[0.12] hover:bg-white/[0.04] transition-all cursor-pointer">
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-medium border border-white-7 bg-white-2 text-white-60 hover:text-white-85 hover:border-white-12 hover:bg-white-4 transition-all cursor-pointer">
                 <Download size={11} /> Import
               </button>
-              {importError && <span className="text-[9px] text-red-400/80 max-w-[100px] truncate">{importError}</span>}
-              <div className="flex items-center border border-white/[0.07] rounded-md overflow-hidden">
+              {importError && <span className="text-[9px] text-danger/80 max-w-[100px] truncate">{importError}</span>}
+              <div className="flex items-center border border-white-7 rounded-md overflow-hidden">
                 {(["a", "b"] as const).map((s, idx) => (
                   <React.Fragment key={s}>
-                    {idx === 1 && <div className="w-px h-3.5 bg-white/[0.07]" />}
+                    {idx === 1 && <div className="w-px h-3.5 bg-white-7" />}
                     <button onClick={() => handleAb(s)}
-                      className={`px-2.5 py-1 text-[9px] font-bold tracking-wider cursor-pointer border-none transition-all ${abState.active === s ? "bg-white/15 text-white" : "bg-transparent text-white/25 hover:text-white/50"}`}>
+                      className={`px-2.5 py-1 text-[9px] font-bold tracking-wider cursor-pointer border-none transition-all ${abState.active === s ? "bg-white-15 text-white" : "bg-transparent text-white-55 hover:text-white-80"}`}>
                       {s.toUpperCase()}
                     </button>
                   </React.Fragment>
                 ))}
               </div>
               <button onClick={resetEq} disabled={!eqEnabled}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-medium border border-white/[0.07] bg-white/[0.02] text-white/35 hover:text-white/60 hover:border-white/[0.12] transition-all cursor-pointer disabled:opacity-25 disabled:cursor-default">
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-medium border border-white-7 bg-white-2 text-white-60 hover:text-white-85 hover:border-white-12 transition-all cursor-pointer disabled:opacity-25 disabled:cursor-default">
                 <RotateCcw size={10} /> Reset
               </button>
               <button onClick={toggleEq}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-[10px] font-bold tracking-wider border transition-all cursor-pointer ${eqEnabled ? "border-white/30 bg-white/10 text-white" : "border-white/[0.07] bg-white/[0.02] text-white/25 hover:text-white/50"}`}>
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-[10px] font-bold tracking-wider border transition-all cursor-pointer ${eqEnabled ? "border-white-30 bg-white-10 text-white" : "border-white-7 bg-white-2 text-white-55 hover:text-white-80"}`}>
                 <Power size={12} /> {eqEnabled ? "ACTIVE" : "BYPASS"}
               </button>
             </div>
@@ -327,7 +337,7 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
           <div className="flex-1 flex min-h-0">
 
             {/* ─── LEFT: Master controls ─── */}
-            <div className="w-[88px] shrink-0 border-r border-white/[0.05] flex flex-col items-center gap-2 py-4 px-2">
+            <div className="w-[88px] shrink-0 border-r border-white-5 flex flex-col items-center gap-2 py-4 px-2">
               {([
                 { label: "VOL", value: volume, min: 0, max: 1, step: 0.01, set: setVolume, display: `${Math.round(volume * 100)}%`, color: undefined },
                 { label: "PRE", value: preamp, min: 0.5, max: 2, step: 0.1, set: setPreamp, display: `${preamp.toFixed(1)}×`, color: undefined },
@@ -335,25 +345,25 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                 { label: "TRBL", value: eqTrebleBoostDb, min: -EQ_MAX_BOOST, max: EQ_MAX_BOOST, step: 0.5, set: setTrebleBoostDb, display: `${gainLabel(eqTrebleBoostDb)}dB`, color: undefined },
               ] as const).map((f, idx) => (
                 <React.Fragment key={f.label}>
-                  {idx > 0 && <div className="w-6 h-px bg-white/[0.04]" />}
+                  {idx > 0 && <div className="w-6 h-px bg-white-4" />}
                   <div className="flex flex-col items-center gap-1">
-                    <span className="text-[8px] font-bold text-white/20 uppercase tracking-[0.14em]">{f.label}</span>
+                    <span className="text-[8px] font-bold text-white-40 uppercase tracking-[0.14em]">{f.label}</span>
                     <VFader value={f.value} min={f.min} max={f.max} step={f.step} onChange={f.set}
                       disabled={!eqEnabled && idx >= 2} color={f.color} width={24} height={120} />
-                    <span className="text-[9px] tabular-nums text-white/35 font-medium">{f.display}</span>
+                    <span className="text-[9px] tabular-nums text-white-65 font-medium">{f.display}</span>
                   </div>
                 </React.Fragment>
               ))}
               {/* Balance */}
-              <div className="w-6 h-px bg-white/[0.04]" />
+              <div className="w-6 h-px bg-white-4" />
               <div className="flex flex-col items-center gap-1 w-full px-1">
-                <span className="text-[8px] font-bold text-white/20 uppercase tracking-[0.14em]">BAL</span>
+                <span className="text-[8px] font-bold text-white-40 uppercase tracking-[0.14em]">BAL</span>
                 <input type="range" min={-1} max={1} step={0.01} value={balance}
                   onChange={(e) => setBalanceVal(Number(e.target.value))}
                   className="w-full h-1" />
                 <button
                   onClick={() => setBalanceVal(0)}
-                  className={`text-[9px] tabular-nums font-medium bg-transparent border-none cursor-pointer transition-colors hover:text-white/70 ${Math.abs(balance) > 0.01 ? "text-white/60" : "text-white"}`}
+                  className={`text-[9px] tabular-nums font-medium bg-transparent border-none cursor-pointer transition-colors hover:text-white-70 ${Math.abs(balance) > 0.01 ? "text-white-60" : "text-white"}`}
                   title="Click to center"
                 >
                   {balanceLabel(balance)}
@@ -366,17 +376,17 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
 
               {/* ─── FREQUENCY RESPONSE CURVE ─── */}
               <div className={`px-5 pt-4 pb-2 shrink-0 transition-opacity duration-300 ${eqEnabled ? "" : "opacity-25"}`}>
-                <div className="relative rounded-lg overflow-hidden border border-white/[0.04] bg-white/[0.01]">
+                <div className="relative rounded-lg overflow-hidden border border-white-4 bg-white-1">
                   <svg viewBox={`0 0 ${curveW} ${curveH}`} className="w-full" style={{ height: 180 }} preserveAspectRatio="none">
                     <defs>
                       <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ffffff" stopOpacity={0.25} />
-                        <stop offset="100%" stopColor="#ffffff" stopOpacity={0} />
+                        <stop offset="0%" stopColor="var(--color-white)" stopOpacity={0.25} />
+                        <stop offset="100%" stopColor="var(--color-white)" stopOpacity={0} />
                       </linearGradient>
                       <linearGradient id="eqStroke" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0%" stopColor="#ffffff" />
-                        <stop offset="50%" stopColor="#ffffff" />
-                        <stop offset="100%" stopColor="#ffffff" />
+                        <stop offset="0%" stopColor="var(--color-white)" />
+                        <stop offset="50%" stopColor="var(--color-white)" />
+                        <stop offset="100%" stopColor="var(--color-white)" />
                       </linearGradient>
                     </defs>
 
@@ -386,9 +396,9 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                       return (
                         <g key={db}>
                           <line x1={0} y1={y} x2={curveW} y2={y}
-                            stroke={db === 0 ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.025)"}
+                            stroke={db === 0 ? "color-mix(in srgb, var(--color-white) 8%, transparent)" : "color-mix(in srgb, var(--color-white) 2.5%, transparent)"}
                             strokeWidth={db === 0 ? 0.8 : 0.5} strokeDasharray={db === 0 ? "none" : "3,8"} />
-                          <text x={curveW - 4} y={y - 3} textAnchor="end" fill="rgba(255,255,255,0.1)" fontSize={8} fontFamily="Inter">
+                          <text x={curveW - 4} y={y - 3} textAnchor="end" fill="color-mix(in srgb, var(--color-white) 35%, transparent)" fontSize={8} fontFamily="Segoe UI, system-ui, sans-serif">
                             {db > 0 ? `+${db}` : db}
                           </text>
                         </g>
@@ -400,8 +410,8 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                       const x = ((Math.log10(hz) - Math.log10(20)) / (Math.log10(20000) - Math.log10(20))) * curveW;
                       return (
                         <g key={hz}>
-                          <line x1={x} y1={0} x2={x} y2={curveH} stroke="rgba(255,255,255,0.025)" strokeWidth={0.5} />
-                          <text x={x} y={curveH - 5} textAnchor="middle" fill="rgba(255,255,255,0.12)" fontSize={8} fontFamily="Inter">
+                          <line x1={x} y1={0} x2={x} y2={curveH} stroke="color-mix(in srgb, var(--color-white) 2.5%, transparent)" strokeWidth={0.5} />
+                          <text x={x} y={curveH - 5} textAnchor="middle" fill="color-mix(in srgb, var(--color-white) 40%, transparent)" fontSize={8} fontFamily="Segoe UI, system-ui, sans-serif">
                             {bandLabel(hz)}
                           </text>
                         </g>
@@ -424,15 +434,15 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                       const sel = selectedBand === i;
                       return (
                         <g key={`${hz}-${i}`} onClick={() => setSelectedBand(sel ? null : i)} style={{ cursor: "pointer" }}>
-                          {sel && <circle cx={x} cy={y} r={10} fill="#ffffff" opacity={0.07} />}
-                          {sel && <circle cx={x} cy={y} r={6} fill="none" stroke="#ffffff" strokeWidth={0.8} opacity={0.3} />}
+                          {sel && <circle cx={x} cy={y} r={10} fill="var(--color-white)" opacity={0.07} />}
+                          {sel && <circle cx={x} cy={y} r={6} fill="none" stroke="var(--color-white)" strokeWidth={0.8} opacity={0.3} />}
                           <circle cx={x} cy={y} r={sel ? 4 : 2.5}
-                            fill={sel ? "#ffffff" : "rgba(255,255,255,0.15)"}
-                            stroke={sel ? "#ffffff" : "none"} strokeWidth={0.5} />
+                            fill={sel ? "var(--color-white)" : "color-mix(in srgb, var(--color-white) 15%, transparent)"}
+                            stroke={sel ? "var(--color-white)" : "none"} strokeWidth={0.5} />
                           {sel && (
                             <>
-                              <rect x={x - 28} y={y - 22} width={56} height={14} rx={3} fill="rgba(6,6,10,0.92)" stroke="#ffffff" strokeWidth={0.5} />
-                              <text x={x} y={y - 11} textAnchor="middle" fill="#ffffff" fontSize={8} fontWeight="bold" fontFamily="Inter">
+                              <rect x={x - 28} y={y - 22} width={56} height={14} rx={3} fill="color-mix(in srgb, var(--color-black) 92%, transparent)" stroke="var(--color-white)" strokeWidth={0.5} />
+                              <text x={x} y={y - 11} textAnchor="middle" fill="var(--color-white)" fontSize={8} fontWeight="bold" fontFamily="Segoe UI, system-ui, sans-serif">
                                 {bandLabel(hz)} {gainLabel(g)}
                               </text>
                             </>
@@ -449,27 +459,27 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                 {/* Controls row */}
                 <div className="flex items-center gap-3 mb-2 shrink-0 flex-wrap">
                   <div className="flex items-center gap-0.5">
-                    <span className="text-[8px] text-white/20 uppercase tracking-wider mr-1">Bands</span>
+                    <span className="text-[8px] text-white-40 uppercase tracking-wider mr-1">Bands</span>
                     {BAND_COUNT_PRESETS.map((n) => (
                       <button key={n}
                         data-active={eqBandCount === n ? "" : undefined}
-                        className="px-1.5 py-0.5 text-[9px] rounded border border-white/[0.07] bg-transparent text-white/25 cursor-pointer transition-all hover:border-white/[0.15] hover:text-white/50 data-[active]:bg-white/10 data-[active]:border-white/30 data-[active]:text-white font-semibold"
+                        className="px-1.5 py-0.5 text-[9px] rounded border border-white-7 bg-transparent text-white-25 cursor-pointer transition-all hover:border-white-15 hover:text-white-50 data-[active]:bg-white-10 data-[active]:border-white-30 data-[active]:text-white font-semibold"
                         onClick={() => setBandCount(n)}>
                         {n}
                       </button>
                     ))}
                   </div>
-                  <div className="h-3 w-px bg-white/[0.06]" />
+                  <div className="h-3 w-px bg-white-6" />
                   <button data-on={eqParametric ? "" : undefined}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-white/[0.07] bg-transparent text-white/25 text-[9px] font-semibold cursor-pointer transition-all hover:border-white/[0.15] hover:text-white/50 data-[on]:border-white/30 data-[on]:bg-white/10 data-[on]:text-white uppercase tracking-wider"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-white-7 bg-transparent text-white-25 text-[9px] font-semibold cursor-pointer transition-all hover:border-white-15 hover:text-white-50 data-[on]:border-white-30 data-[on]:bg-white-10 data-[on]:text-white uppercase tracking-wider"
                     onClick={toggleEqParametric}>
                     <SlidersHorizontal size={10} /> {eqParametric ? "Para" : "Geo"}
                   </button>
-                  <label className="flex items-center gap-1 text-[9px] text-white/25 cursor-pointer select-none uppercase tracking-wider font-semibold hover:text-white/40 transition-colors">
+                  <label className="flex items-center gap-1 text-[9px] text-white-25 cursor-pointer select-none uppercase tracking-wider font-semibold hover:text-white-50 transition-colors">
                     <input type="checkbox" checked={eqAuto} onChange={toggleEqAuto} className="accent-white scale-90" />
                     <Sparkles size={10} /> Auto
                   </label>
-                  {!presetsAvailable && <span className="text-[8px] text-white/10 italic">Presets: 10 bands</span>}
+                  {!presetsAvailable && <span className="text-[8px] text-white-40 italic">Presets: 10 bands</span>}
                 </div>
 
                 {/* Fader columns */}
@@ -484,11 +494,11 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                     return (
                       <div key={`${hz}-${i}`}
                         onClick={() => setSelectedBand(sel ? null : i)}
-                        className={`flex flex-col items-center flex-1 min-w-[28px] mx-[1px] rounded-lg cursor-pointer transition-all border ${sel ? "bg-white/[0.03] border-white/10" : "bg-transparent border-transparent hover:bg-white/[0.015]"}`}>
+                        className={`flex flex-col items-center flex-1 min-w-[28px] mx-[1px] rounded-lg cursor-pointer transition-all border ${sel ? "bg-white-3 border-white-10" : "bg-transparent border-transparent hover:bg-white-2"}`}>
 
                         {/* Gain readout */}
                         <div className="pt-2 pb-1 shrink-0">
-                          <span className={`text-[10px] tabular-nums font-bold ${isPos ? "text-white" : isNeg ? "text-red-400/80" : "text-white/20"}`}>
+                          <span className={`text-[10px] tabular-nums font-bold ${isPos ? "text-white" : isNeg ? "text-danger/80" : "text-white-50"}`}>
                             {gainLabel(gain)}
                           </span>
                         </div>
@@ -506,14 +516,14 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                               title={`Q = ${q.toFixed(1)}`}
                               onClick={(e) => e.stopPropagation()}
                               onChange={(e) => { e.stopPropagation(); setEqBandQ(i, Number(e.target.value)); }}
-                              className="w-full h-1" style={{ accentColor: "#ffffff" }} />
-                            <span className="text-[7px] text-white/12 block text-center mt-0.5">Q{q.toFixed(1)}</span>
+                              className="w-full h-1" style={{ accentColor: "var(--color-white)" }} />
+                            <span className="text-[7px] text-white-40 block text-center mt-0.5">Q{q.toFixed(1)}</span>
                           </div>
                         )}
 
                         {/* Frequency label */}
                         <div className="pb-2 pt-1 shrink-0">
-                          <span className={`text-[8px] leading-tight block ${sel ? "text-white font-bold" : "text-white/20"}`}>{bandLabel(hz)}</span>
+                          <span className={`text-[8px] leading-tight block ${sel ? "text-white font-bold" : "text-white-50"}`}>{bandLabel(hz)}</span>
                         </div>
                       </div>
                     );
@@ -523,10 +533,10 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
             </div>
 
             {/* ─── RIGHT: Presets ─── */}
-            <div className="w-[180px] shrink-0 border-l border-white/[0.05] flex flex-col overflow-y-auto"
+            <div className="w-[180px] shrink-0 border-l border-white-5 flex flex-col overflow-y-auto"
               style={{ scrollbarWidth: "none" }}>
               <div className="px-3 pt-3 pb-1.5">
-                <span className="text-[8px] font-bold text-white/20 uppercase tracking-[0.15em]">Presets</span>
+                <span className="text-[8px] font-bold text-white-40 uppercase tracking-[0.15em]">Presets</span>
               </div>
               <div className="flex-1 px-2 pb-3 space-y-0.5">
                 {presetsAvailable ? (
@@ -534,7 +544,7 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                     const isActive = eqPreset === preset.key;
                     return (
                       <button key={preset.key}
-                        className={`w-full text-left px-2.5 py-2 rounded-lg text-[10px] font-medium transition-all cursor-pointer border ${isActive ? "bg-white/[0.06] border-white/15 text-white" : "bg-transparent border-transparent text-white/25 hover:text-white/50 hover:bg-white/[0.02]"}`}
+                        className={`w-full text-left px-2.5 py-2 rounded-lg text-[10px] font-medium transition-all cursor-pointer border ${isActive ? "bg-white-6 border-white-15 text-white" : "bg-transparent border-transparent text-white-55 hover:text-white-80 hover:bg-white-2"}`}
                         disabled={!eqEnabled}
                         onClick={() => applyEqPreset(preset.key)}>
                         <div className="flex items-center justify-between mb-1">
@@ -545,7 +555,7 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                           {preset.gains.map((g, j) => (
                             <div key={j} className="flex-1 rounded-[1px]" style={{
                               height: `${Math.max(1, Math.abs(g) / EQ_MAX_GAIN * 100)}%`,
-                              background: g > 0 ? "#ffffff" : g < 0 ? "rgba(239,68,68,0.45)" : "rgba(255,255,255,0.06)",
+                              background: g > 0 ? "var(--color-white)" : g < 0 ? "color-mix(in srgb, var(--color-danger) 45%, transparent)" : "color-mix(in srgb, var(--color-white) 6%, transparent)",
                               alignSelf: g >= 0 ? "flex-end" : "flex-start",
                               opacity: isActive ? 1 : 0.4,
                             }} />
@@ -556,7 +566,7 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                   })
                 ) : (
                   <div className="px-3 py-8 text-center">
-                    <span className="text-[9px] text-white/10 italic">Select 10 bands</span>
+                    <span className="text-[9px] text-white-40 italic">Select 10 bands</span>
                   </div>
                 )}
               </div>

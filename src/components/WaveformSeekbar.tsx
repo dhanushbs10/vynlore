@@ -89,7 +89,7 @@ export function WaveformSeekbar() {
         style={{ height: 80, minWidth: 200 }}
         onClick={handleClick}
       >
-        {/* Bars — flex-1 per bar, fills full width, no padding, no JS width */}
+        {/* Bars â€” flex-1 per bar, fills full width, no padding, no JS width */}
         <div
           className="absolute inset-0 flex items-stretch pointer-events-none z-[1] overflow-hidden"
           style={{ gap: `${BAR_GAP}px` }}
@@ -108,7 +108,7 @@ export function WaveformSeekbar() {
                     animate={{ height: `${h}%` }}
                     transition={{ duration: 0.25, delay: i * 0.008, ease: "easeOut" }}
                     style={{
-                      backgroundColor: played ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.15)",
+                      backgroundColor: played ? "color-mix(in srgb, var(--color-white) 90%, transparent)" : "color-mix(in srgb, var(--color-white) 15%, transparent)",
                       transition: "background-color 150ms ease-out",
                     }}
                   />
@@ -122,7 +122,7 @@ export function WaveformSeekbar() {
                     animate={{ height: `${h}%` }}
                     transition={{ duration: 0.25, delay: i * 0.008, ease: "easeOut" }}
                     style={{
-                      backgroundColor: played ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.1)",
+                      backgroundColor: played ? "color-mix(in srgb, var(--color-white) 75%, transparent)" : "color-mix(in srgb, var(--color-white) 10%, transparent)",
                       transition: "background-color 150ms ease-out",
                     }}
                   />
@@ -132,14 +132,14 @@ export function WaveformSeekbar() {
           })}
         </div>
 
-        {/* Playhead — same container as bars, so left% aligns with color boundary */}
+        {/* Playhead â€” same container as bars, so left% aligns with color boundary */}
         {duration > 0 && (
           <div
             className="absolute top-0 bottom-0 w-[2px] z-[2]"
             style={{
               left: `${playheadPct}%`,
-              backgroundColor: "rgba(255,255,255,0.9)",
-              boxShadow: "0 0 4px rgba(255,255,255,0.2)",
+              backgroundColor: "color-mix(in srgb, var(--color-white) 90%, transparent)",
+              boxShadow: "0 0 4px color-mix(in srgb, var(--color-white) 20%, transparent)",
               transform: "translateX(-1px)",
               transition: "left 100ms linear",
             }}
@@ -150,7 +150,7 @@ export function WaveformSeekbar() {
       {/* Time labels */}
       <div
         className="flex justify-between text-[10px] tabular-nums pointer-events-none z-[5]"
-        style={{ color: "rgba(255,255,255,0.4)" }}
+        style={{ color: "color-mix(in srgb, var(--color-white) 40%, transparent)" }}
       >
         <span>{formatTime(elapsed)}</span>
         <span style={{ marginLeft: "auto" }}>-{formatTime(Math.max(0, duration - elapsed))}</span>
@@ -160,44 +160,44 @@ export function WaveformSeekbar() {
       <div className="flex items-center justify-center gap-4 z-[10]">
         <button
           onClick={toggleShuffle}
-          className={`transition-colors ${isShuffle ? "text-white" : "text-[rgba(255,255,255,0.4)] hover:text-white"}`}
+          className={`transition-colors ${isShuffle ? "text-white" : "text-white-40 hover:text-white"}`}
           aria-label="Shuffle"
         >
           <Shuffle size={16} />
         </button>
         <button
           onClick={playPrev}
-          className="text-[rgba(255,255,255,0.5)] hover:text-white transition-colors"
+          className="text-white-50 hover:text-white transition-colors"
           aria-label="Previous"
         >
           <SkipBack size={18} />
         </button>
         <button
           onClick={togglePlayPause}
-          className="w-9 h-9 flex items-center justify-center rounded-full text-white hover:bg-[rgba(255,255,255,0.1)] transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-full text-white hover:bg-white-10 transition-colors"
           aria-label={isPlaying && !isPaused ? "Pause" : "Play"}
         >
           {isPlaying && !isPaused ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--color-white)">
               <rect x="6" y="4" width="4" height="16" />
               <rect x="14" y="4" width="4" height="16" />
             </svg>
           ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--color-white)">
               <polygon points="5,3 19,12 5,21" />
             </svg>
           )}
         </button>
         <button
           onClick={playNext}
-          className="text-[rgba(255,255,255,0.5)] hover:text-white transition-colors"
+          className="text-white-50 hover:text-white transition-colors"
           aria-label="Next"
         >
           <SkipForward size={18} />
         </button>
         <button
           onClick={toggleRepeat}
-          className={`relative transition-colors ${repeatMode !== "off" ? "text-white" : "text-[rgba(255,255,255,0.4)] hover:text-white"}`}
+          className={`relative transition-colors ${repeatMode !== "off" ? "text-white" : "text-white-40 hover:text-white"}`}
           aria-label="Repeat"
         >
           {repeatMode === "one" ? <Repeat1 size={16} /> : <Repeat size={16} />}

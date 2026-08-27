@@ -5,8 +5,6 @@
 
 vynlore-audio/
 │
-├── .art-cache/                          # Cached artwork / generated assets
-│
 ├── src-tauri/                           # ─── RUST BACKEND (Tauri v2) ──────────
 │   │
 │   ├── Cargo.toml                       # Rust dependencies (symphonia, cpal,
@@ -64,7 +62,7 @@ vynlore-audio/
 │       │   │                           #   volume/balance applied here),
 │       │   │                           #   run_diagnostic_sine() for --excl-test
 │       │   │
-│       │   ├── eq.rs                   # 10-band parametric EQ (RBJ biquad filters):
+│       │   ├── eq.rs                   # Multi-band parametric EQ (RBJ biquad filters):
 │       │   │                           #   low-shelf (band 0), peaking (1-8),
 │       │   │                           #   high-shelf (band 9), process_interleaved(),
 │       │   │                           #   coefficient caching, EqSettings (SharedEq)
@@ -149,16 +147,16 @@ vynlore-audio/
 │   │   │                              #   + SpectrumBars visualization (background)
 │   │   │
 │   │   ├── WaveformSeekbar.tsx        # *** FULLSCREEN WAVEFORM VISUALIZATION ***
-│   │   │                              #   Scrolling RMS waveform bars (left half),
-│   │   │                              #   center playhead, transport controls overlaid,
-│   │   │                              #   click-to-seek, listens to "spectrum-data"
-│   │   │                              #   events, sprout animation (ease-out cubic)
+│   │   │                              #   RMS waveform bars, center playhead,
+│   │   │                              #   transport controls overlaid, click-to-seek,
+│   │   │                              #   peak data loaded via get_waveform,
+│   │   │                              #   sprout animation (ease-out cubic)
 │   │   │
 │   │   ├── SpectrumBars.tsx           # 64-bar spectrum visualizer (also used in
 │   │   │                              #   PlayerBar background), temporal smoothing,
 │   │   │                              #   listens to "spectrum-data" events
 │   │   │
-│   │   ├── EqPanel.tsx                # 10-band EQ panel (slides up from bottom):
+│   │   ├── EqPanel.tsx                # Multi-band EQ panel (slides up from bottom):
 │   │   │                              #   volume slider, preamp, balance (L/R),
 │   │   │                              #   10 faders, preset selector, auto-genre
 │   │   │                              #   toggle, frequency response curve (SVG)
@@ -213,7 +211,6 @@ vynlore-audio/
 ├── package-lock.json
 ├── build_export.cjs                   # Build/export utility scripts
 ├── build_export.js
-├── fix-app.ts
 ├── TECH_STACK.md                      # Tech stack documentation
 ├── .gitignore
 └── library.db*                        # SQLite DB copies (dev artifact)
@@ -268,7 +265,7 @@ vynlore-audio/
                                       #   player::start(), run_decoder(), gapless
     src-tauri/src/audio/wasapi.rs     # WASAPI exclusive mode (Windows)
     src-tauri/src/audio/output.rs     # cpal shared mode
-    src-tauri/src/audio/eq.rs         # 10-band RBJ biquad EQ
+    src-tauri/src/audio/eq.rs         # Multi-band RBJ biquad EQ
     src-tauri/src/audio/spectrum.rs   # 64-bin FFT analyzer
     src-tauri/src/audio/queue.rs      # Thread-safe sample FIFO
     src-tauri/src/decoder/audio.rs    # Symphonia decode (open, packet, seek)

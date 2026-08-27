@@ -62,7 +62,7 @@ export function GenreDetailView({
         </div>
         <div className="flex gap-2.5 ml-auto">
           <motion.button
-            className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white/5 hover:text-text transition-colors w-auto"
+            className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white-5 hover:text-text transition-colors w-auto"
             onClick={handleShuffle}
             whileTap={{ scale: 0.95 }}
             aria-label="Shuffle genre"

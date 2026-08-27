@@ -54,6 +54,12 @@ pub struct ControlBlock {
 
 	pub next_file: Mutex<Option<PathBuf>>,
 	pub current_file: Mutex<PathBuf>,
+
+	// ReplayGain applied in the decode pump (pre-EQ). `replaygain` is the live
+	// gain for the current file; `pending_rg_gain` is pre-armed by the frontend
+	// when it queues the next track and is swapped in at the gapless boundary.
+	pub replaygain: Arc<AtomicU32>,
+	pub pending_rg_gain: Arc<AtomicU32>,
 }
 
 impl ControlBlock {
@@ -144,6 +150,10 @@ impl PlaybackHandle {
 	pub fn set_next(&self, path: Option<PathBuf>) {
 		*self.control.next_file.lock().unwrap_or_else(|e| e.into_inner()) = path;
 	}
+
+	pub fn set_next_rg_gain(&self, gain_bits: u32) {
+		self.control.pending_rg_gain.store(gain_bits, Ordering::Relaxed);
+	}
 }
 
 impl Drop for PlaybackHandle {
@@ -193,6 +203,7 @@ pub fn start(
 	spectrum: Arc<crate::audio::spectrum::SpectrumAnalyzer>,
 	balance: Arc<AtomicU32>,
 	preamp: Arc<AtomicU32>,
+	replaygain_gain: f32,
 	app: AppHandle,
 	initial_seek: f64,
 ) -> Result<(PlaybackHandle, bool), String> {
@@ -235,7 +246,10 @@ pub fn start(
 	));
 
 	let file_bit_depth = format.bit_depth;
-	let mut pipeline = Pipeline::new(decoder, format, out_rate, eq.clone(), preamp.clone())?;
+	let replaygain = Arc::new(AtomicU32::new(replaygain_gain.clamp(0.0, 4.0).to_bits()));
+	let pending_rg = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+	let mut pipeline =
+		Pipeline::new(decoder, format, out_rate, eq.clone(), preamp.clone(), replaygain.clone())?;
 	if initial_seek > 0.0 {
 		pipeline.seek(initial_seek);
 	}
@@ -262,6 +276,8 @@ pub fn start(
 		pending_change: AtomicBool::new(false),
 		next_file: Mutex::new(None),
 		current_file: Mutex::new(path.to_path_buf()),
+		replaygain: replaygain.clone(),
+		pending_rg_gain: pending_rg,
 	});
 
 	// Backend opens BEFORE the decode thread spawns so a failed open can't
@@ -377,6 +393,7 @@ struct Pipeline {
 	scratch: Vec<f32>,
 	eq: crate::audio::eq::EqProcessor,
 	preamp: Arc<AtomicU32>,
+	replaygain: Arc<AtomicU32>,
 	eof: bool,
 	tail_flushed: bool,
 }
@@ -393,6 +410,7 @@ impl Pipeline {
 		out_rate: u32,
 		eq: crate::audio::eq::SharedEq,
 		preamp: Arc<AtomicU32>,
+		replaygain: Arc<AtomicU32>,
 	) -> Result<Self, String> {
 		let resampler = if format.sample_rate != out_rate {
 			let params = SincInterpolationParameters {
@@ -420,6 +438,7 @@ impl Pipeline {
 			scratch: Vec::new(),
 			eq: eq_processor,
 			preamp,
+			replaygain,
 			eof: false,
 			tail_flushed: false,
 		})
@@ -450,10 +469,17 @@ impl Pipeline {
 		}
 	}
 
+	#[inline]
+	fn total_gain(&self) -> f32 {
+		let preamp = f32::from_bits(self.preamp.load(Ordering::Relaxed));
+		let rg = f32::from_bits(self.replaygain.load(Ordering::Relaxed));
+		(preamp * rg).max(0.0)
+	}
+
 	fn pump(&mut self, queue: &SampleQueue) -> Pushed {
 		let ch = self.format.channels as usize;
 		let available_frames = self.pending.len() / ch;
-		let preamp_gain = f32::from_bits(self.preamp.load(Ordering::Relaxed));
+		let preamp_gain = self.total_gain();
 
 		match self.resampler.as_mut() {
 			Some(r) => {
@@ -515,7 +541,7 @@ impl Pipeline {
 		let ch = self.format.channels as usize;
 		let available_frames = self.pending.len() / ch;
 		let mut total: u64 = 0;
-		let preamp_gain = f32::from_bits(self.preamp.load(Ordering::Relaxed));
+		let preamp_gain = self.total_gain();
 
 		if let Some(r) = self.resampler.as_mut() {
 			if available_frames > 0 {
@@ -606,7 +632,12 @@ fn try_chain(control: &Arc<ControlBlock>, out_rate: u32, eq: crate::audio::eq::S
             control.boundaries_lock().push_back(mark);
 			control.has_boundary.store(true, Ordering::Relaxed);
 			*control.current_file.lock().unwrap_or_else(|e| e.into_inner()) = next_path;
-			match Pipeline::new(decoder, format, out_rate, eq, preamp) {
+			// Swap the pre-armed ReplayGain for this file into the live slot so
+			// the first pump of the new file already uses the right loudness.
+			control
+				.replaygain
+				.store(control.pending_rg_gain.load(Ordering::Relaxed), Ordering::Relaxed);
+			match Pipeline::new(decoder, format, out_rate, eq, preamp, control.replaygain.clone()) {
 				Ok(p) => ChainResult::Chained(Box::new(p)),
 				Err(e) => {
 					eprintln!("gapless chain failed: {}", e);

@@ -150,6 +150,7 @@ fn main() {
         spectrum: std::sync::Arc::new(crate::audio::spectrum::SpectrumAnalyzer::new()),
         balance: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
         preamp: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
+        replaygain_mode: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1)),
         cover_dir: cover_dir.clone(),
       };
       app.manage(state);
@@ -161,14 +162,26 @@ fn main() {
       std::thread::Builder::new()
         .name("vynlore-spectrum".into())
         .spawn(move || {
+          // Only keep emitting while audio is actually reaching the analyzer.
+          // When playback goes idle, send one all-zero frame so the UI bars
+          // fall silent, then stop emitting entirely (saves a cold ~30fps IPC).
+          let mut was_active = false;
           while spectrum_running_clone.load(Ordering::Relaxed) {
             std::thread::sleep(std::time::Duration::from_millis(33));
-            spectrum.compute();
-            let bins = spectrum.snapshot();
+            let active = spectrum.is_active();
+            let bins = if active {
+              spectrum.compute();
+              spectrum.snapshot()
+            } else if was_active {
+              vec![0.0; 64]
+            } else {
+              continue;
+            };
             let _ = app_handle_clone.emit(
               "spectrum-data",
               crate::audio::spectrum::SpectrumPayload { bins },
             );
+            was_active = active;
           }
         })
         .expect("failed to spawn spectrum thread");
@@ -182,27 +195,37 @@ fn main() {
           .name("vynlore-startup-scan".into())
           .spawn(move || {
           let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if let Ok(db) = db.lock() {
-              scan_folder_internal(&db, std::path::Path::new(&folder_path), &cover_dir_scan, |count| {
-                if count % 50 == 0 {
+            scan_folder_internal(
+              db.as_ref(),
+              std::path::Path::new(&folder_path),
+              &cover_dir_scan,
+              |count, total| {
+                if count == 0 || count % 50 == 0 {
                   let _ = app_handle.emit("watcher-event", WatcherEvent {
                     title: "Startup scan...".to_string(),
                     artist: folder_path.clone(),
                     count,
+                    total: Some(total),
                   });
                 }
-              })
-            } else {
-              Err("Failed to lock DB for scan".into())
-            }
+              },
+            )
           }));
 
           match result {
             Ok(Ok(count)) => {
+              // Drop tracks from a previously configured folder that is no
+              // longer watched (folder switched while the app was off).
+              if let Ok(dbg) = db.lock() {
+                if let Err(e) = dbg.remove_tracks_not_in_folder(&folder_path) {
+                  eprintln!("Failed to prune old-folder tracks: {}", e);
+                }
+              }
               let _ = app_handle.emit("watcher-event", WatcherEvent {
                 title: "Startup scan complete".to_string(),
                 artist: folder_path,
                 count,
+                total: None,
               });
             }
             Ok(Err(e)) => {
@@ -219,15 +242,23 @@ fn main() {
         }
       }
 
-      // Handle file association: if launched with an audio file path, emit it to frontend
-      let audio_exts = ["flac","wav","wave","aiff","aif","mp3","m4a","m4b","ogg","oga","opus","wma","ape","wv","dsf","dff"];
+      // Handle file association: if launched with an audio file path, emit it
+      // to the frontend. Only associations the engine can actually decode are
+      // accepted (see metadata.rs SUPPORTED_EXTENSIONS — no Opus/WMA/APE/etc.).
+      let audio_exts = ["flac", "wav", "wave", "aiff", "aif", "aifc", "mp3", "m4a", "m4b", "ogg", "oga"];
       for arg in std::env::args().skip(1) {
         if let Some(ext) = std::path::Path::new(&arg)
           .extension()
           .and_then(|e| e.to_str())
         {
           if audio_exts.contains(&ext.to_lowercase().as_str()) {
-            let _ = app.emit("open-file", arg);
+            // This runs in setup(), before the webview has registered its
+            // "open-file" listener — defer the emit so it isn't lost.
+            let app_for_emit = app.handle().clone();
+            std::thread::spawn(move || {
+              std::thread::sleep(std::time::Duration::from_millis(1200));
+              let _ = app_for_emit.emit("open-file", arg);
+            });
             break;
           }
         }
@@ -243,6 +274,7 @@ fn main() {
       commands::set_volume,
       commands::set_balance,
       commands::set_preamp,
+      commands::set_replaygain_mode,
       commands::pause_playback,
       commands::resume_playback,
       commands::play_track,
@@ -252,6 +284,7 @@ fn main() {
       commands::update_eq,
       commands::queue_next_track,
       commands::increment_play_count,
+      commands::add_external_track,
       commands::get_recently_played,
       commands::create_playlist,
       commands::get_playlists,
@@ -271,7 +304,11 @@ fn main() {
       commands::set_playlist_color,
       commands::get_playlist_color,
       commands::get_waveform,
-      commands::read_text_file
+      commands::read_text_file,
+      commands::list_theme_files,
+      commands::save_theme_file,
+      commands::delete_theme_file,
+      commands::export_theme_file
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

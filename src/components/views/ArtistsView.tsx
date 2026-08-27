@@ -64,7 +64,7 @@ export function ArtistsView({ tracks, onArtistClick }: ArtistsViewProps) {
 
       <div className="mb-5">
         <input
-          className="w-full max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-white/30 transition-colors"
+          className="w-full max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-white-30 transition-colors"
           placeholder="Search artists…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}

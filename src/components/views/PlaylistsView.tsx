@@ -73,7 +73,7 @@ export function PlaylistsView(props: PlaylistsViewProps) {
       {showCreate && (
         <div className="flex gap-2.5 mb-5">
           <input
-            className="flex-1 max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-white/30 transition-colors"
+            className="flex-1 max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-white-30 transition-colors"
             placeholder="Playlist name..."
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
@@ -103,7 +103,7 @@ export function PlaylistsView(props: PlaylistsViewProps) {
               style={playlist.cover_path
                 ? undefined
                 : playlist.color
-                  ? { background: `linear-gradient(135deg, ${playlist.color}, ${playlist.color}88, rgba(0,0,0,0.4))` }
+                  ? { background: `linear-gradient(135deg, ${playlist.color}, ${playlist.color}88, color-mix(in srgb, var(--color-black) 40%, transparent))` }
                   : { background: "var(--color-bg-surface)" }
               }
             >
@@ -119,7 +119,7 @@ export function PlaylistsView(props: PlaylistsViewProps) {
               {playlist.name !== "Liked Songs" && (
                 <button
                   onClick={(e) => handleDelete(e, playlist.id, playlist.name)}
-                  className="absolute top-1.5 right-1.5 w-[22px] h-[22px] rounded-full bg-black/50 flex items-center justify-center cursor-pointer text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute top-1.5 right-1.5 w-[22px] h-[22px] rounded-full bg-black-50 flex items-center justify-center cursor-pointer text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                   aria-label="Delete playlist"
                 >
                   ×

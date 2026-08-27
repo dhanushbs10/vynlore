@@ -15,6 +15,7 @@ import {
   defaultQs,
   presetForGenre,
 } from "../audio/eqPresets";
+import { scrobbleListenBrainz } from "../audio/scrobble";
 
 const EQ_PRESET_KEYS = new Set(EQ_PRESETS.map((p) => p.key));
 
@@ -64,8 +65,19 @@ interface PlayerContextType {
     stop: () => Promise<void>;
     playNext: () => Promise<void>;
     playPrev: () => Promise<void>;
+    sleepTimerSeconds: number | null;
+    sleepRemainingMs: number | null;
+    setSleepTimer: (minutes: number) => void;
+    cancelSleepTimer: () => void;
+    replaygainMode: number;
+    setReplaygainMode: (mode: number) => void;
+    scrobbleEnabled: boolean;
+    scrobbleToken: string;
+    setScrobbleEnabled: (enabled: boolean) => void;
+    setScrobbleToken: (token: string) => void;
     setLibraryTracks: (tracks: Track[]) => void;
     setDisplayedTracks: (tracks: Track[]) => void;
+    setQueueToLibrary: () => void;
     reorderQueue: (from: number, to: number) => void;
 }
 
@@ -77,6 +89,28 @@ const EXCLUSIVE_KEY = "vynlore.exclusive";
 const EQ_KEY = "vynlore.eq";
 const BALANCE_KEY = "vynlore.balance";
 const PREAMP_KEY = "vynlore.preamp";
+const SLEEP_TIMER_KEY = "vynlore.sleepTimer";
+const REPLAYGAIN_KEY = "vynlore.replaygain";
+const SCROBBLE_ENABLED_KEY = "vynlore.scrobble.enabled";
+const SCROBBLE_TOKEN_KEY = "vynlore.scrobble.token";
+
+function loadStoredReplaygainMode(): number {
+    try {
+        const raw = window.localStorage.getItem(REPLAYGAIN_KEY);
+        if (raw === "0" || raw === "1" || raw === "2") return Number(raw);
+    } catch {
+        // ignore
+    }
+    return 1;
+}
+
+function loadStoredFlag(key: string): boolean {
+    try {
+        return window.localStorage.getItem(key) === "1";
+    } catch {
+        return false;
+    }
+}
 
 interface EqPersisted {
     enabled: boolean;
@@ -214,6 +248,40 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [eqBandCount, setEqBandCountState] = useState<number>(storedEq.bandCount ?? EQ_BANDS_HZ.length);
     const [eqBassBoostDb, setEqBassBoostDbState] = useState<number>(storedEq.bassBoostDb ?? 0);
     const [eqTrebleBoostDb, setEqTrebleBoostDbState] = useState<number>(storedEq.trebleBoostDb ?? 0);
+    const [sleepTimerSeconds, setSleepTimerSeconds] = useState<number | null>(() => {
+        try {
+            const raw = window.localStorage.getItem(SLEEP_TIMER_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw) as { endsAt: number; minutes: number };
+                if (parsed.endsAt > Date.now() && parsed.minutes > 0) return parsed.minutes;
+            }
+        } catch {
+            // ignore
+        }
+        return null;
+    });
+    const [sleepRemainingMs, setSleepRemainingMs] = useState<number | null>(() => {
+        try {
+            const raw = window.localStorage.getItem(SLEEP_TIMER_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw) as { endsAt: number };
+                const remaining = parsed.endsAt - Date.now();
+                if (remaining > 0) return remaining;
+            }
+        } catch {
+            // ignore
+        }
+        return null;
+    });
+    const [replaygainMode, setReplaygainModeState] = useState<number>(() => loadStoredReplaygainMode());
+    const [scrobbleEnabled, setScrobbleEnabledState] = useState<boolean>(() => loadStoredFlag(SCROBBLE_ENABLED_KEY));
+    const [scrobbleToken, setScrobbleTokenState] = useState<string>(() => {
+        try {
+            return window.localStorage.getItem(SCROBBLE_TOKEN_KEY) ?? "";
+        } catch {
+            return "";
+        }
+    });
 
     const volumeRef = useRef(volume);
     const selectedDeviceRef = useRef(selectedDevice);
@@ -230,10 +298,21 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const eqBassBoostRef = useRef(eqBassBoostDb);
     const eqTrebleBoostRef = useRef(eqTrebleBoostDb);
     const displayedTracksRef = useRef(displayedTracks);
+    // True while `displayedTracks` mirrors the full library (the default
+    // queue). Library refreshes from scans/watcher only swap displayedTracks
+    // in this state — once the user builds a custom queue (play-from-search,
+    // reorder, shuffle), refreshes must not silently reset it.
+    const isDefaultQueueRef = useRef(true);
     const currentTrackRef = useRef(currentTrack);
     const repeatModeRef = useRef(repeatMode);
     const preShuffleQueueRef = useRef<Track[]>([]);
     const lastQueuedNextRef = useRef<string | null>(null);
+    const sleepDeadlineRef = useRef<number | null>(null);
+    const replaygainModeRef = useRef(replaygainMode);
+    const scrobbleEnabledRef = useRef(scrobbleEnabled);
+    const scrobbleTokenRef = useRef(scrobbleToken);
+    const lastScrobbledPathRef = useRef<string | null>(null);
+    const currentTimeRef = useRef(0);
     const playInFlightRef = useRef(false);
     const lastRequestedTrackRef = useRef<string>("");
     const actionsRef = useRef<{ togglePlayPause: () => void; playNext: () => Promise<void>; playPrev: () => Promise<void>; playTrack: (track: Track, newQueue?: Track[]) => Promise<void> }>({
@@ -264,9 +343,133 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     displayedTracksRef.current = displayedTracks;
     currentTrackRef.current = currentTrack;
     repeatModeRef.current = repeatMode;
+    scrobbleEnabledRef.current = scrobbleEnabled;
+    scrobbleTokenRef.current = scrobbleToken;
+    currentTimeRef.current = currentTime;
+
+    // ── Sleep timer ────────────────────────────────────────────────────────
+    const setSleepTimer = useCallback((minutes: number) => {
+        if (minutes <= 0) {
+            sleepDeadlineRef.current = null;
+            setSleepTimerSeconds(null);
+            setSleepRemainingMs(null);
+            try {
+                window.localStorage.removeItem(SLEEP_TIMER_KEY);
+            } catch {
+                // ignore
+            }
+            return;
+        }
+        const endsAt = Date.now() + minutes * 60_000;
+        sleepDeadlineRef.current = endsAt;
+        setSleepTimerSeconds(minutes);
+        setSleepRemainingMs(minutes * 60_000);
+        try {
+            window.localStorage.setItem(SLEEP_TIMER_KEY, JSON.stringify({ endsAt, minutes }));
+        } catch {
+            // ignore
+        }
+    }, []);
+
+    // Resume an active countdown after the app restarts.
+    useEffect(() => {
+        try {
+            const raw = window.localStorage.getItem(SLEEP_TIMER_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw) as { endsAt: number };
+                if (parsed.endsAt > Date.now()) {
+                    sleepDeadlineRef.current = parsed.endsAt;
+                } else {
+                    window.localStorage.removeItem(SLEEP_TIMER_KEY);
+                }
+            }
+        } catch {
+            // ignore
+        }
+    }, []);
+
+    useEffect(() => {
+        if (sleepTimerSeconds === null) return;
+        const tick = () => {
+            const deadline = sleepDeadlineRef.current;
+            if (deadline === null) return;
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) {
+                sleepDeadlineRef.current = null;
+                setSleepTimerSeconds(null);
+                setSleepRemainingMs(null);
+                try {
+                    window.localStorage.removeItem(SLEEP_TIMER_KEY);
+                } catch {
+                    // ignore
+                }
+                if (currentTrackRef.current && !isPausedRef.current) {
+                    void invoke("pause_playback")
+                        .then(() => setIsPaused(true))
+                        .catch(() => {});
+                }
+                return;
+            }
+            setSleepRemainingMs(remaining);
+        };
+        const id = window.setInterval(tick, 500);
+        return () => window.clearInterval(id);
+    }, [sleepTimerSeconds]);
+
+    const cancelSleepTimer = useCallback(() => setSleepTimer(0), [setSleepTimer]);
+
+    useEffect(() => {
+        if (!isTauri()) return;
+        void invoke("set_replaygain_mode", { mode: replaygainModeRef.current }).catch(() => {});
+    }, []);
+
+    const setReplaygainMode = useCallback((mode: number) => {
+        const m = mode < 0 ? 0 : mode > 2 ? 2 : mode;
+        setReplaygainModeState(m);
+        replaygainModeRef.current = m;
+        try {
+            window.localStorage.setItem(REPLAYGAIN_KEY, String(m));
+        } catch {
+            // ignore
+        }
+        if (isTauri()) void invoke("set_replaygain_mode", { mode: m }).catch(() => {});
+    }, []);
+
+    const setScrobbleEnabled = useCallback((enabled: boolean) => {
+        setScrobbleEnabledState(enabled);
+        scrobbleEnabledRef.current = enabled;
+        try {
+            window.localStorage.setItem(SCROBBLE_ENABLED_KEY, enabled ? "1" : "0");
+        } catch {
+            // ignore
+        }
+    }, []);
+
+    const setScrobbleToken = useCallback((token: string) => {
+        setScrobbleTokenState(token);
+        scrobbleTokenRef.current = token;
+        try {
+            window.localStorage.setItem(SCROBBLE_TOKEN_KEY, token);
+        } catch {
+            // ignore
+        }
+    }, []);
+
+    // Scrobble a finished listen: a real play is 75% of the track or 4+
+    // minutes elapsed, and never twice for the same file in a row.
+    const maybeScrobble = useCallback((track: Track | null, playedSecs: number) => {
+        if (!track || !scrobbleEnabledRef.current || !scrobbleTokenRef.current.trim()) return;
+        const dur = track.duration_secs || 0;
+        const qualifying = dur > 30 && (playedSecs >= dur * 0.75 || (dur > 0 && playedSecs >= 240));
+        if (!qualifying) return;
+        if (lastScrobbledPathRef.current === track.file_path) return;
+        lastScrobbledPathRef.current = track.file_path;
+        void scrobbleListenBrainz(scrobbleTokenRef.current, track).catch(() => {});
+    }, []);
 
     const handlePlaybackEnded = useCallback(async () => {
         const track = currentTrackRef.current;
+        maybeScrobble(track, currentTimeRef.current);
         if (!track) return;
         const mode = repeatModeRef.current;
         if (mode === "one") {
@@ -294,13 +497,19 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         listen<{ path: string }>("track-changed", (event) => {
             if (disposed) return;
-            if (event.payload.path !== lastRequestedTrackRef.current) return;
+            // The backend only emits this when playback audibly crossed into a
+            // gaplessly chained track (run_decoder boundary). Manual starts
+            // never produce it, so accept every boundary crossing without
+            // gating on the last requested path — otherwise the UI, play-counts
+            // and the queue_next_track effect all stay stuck on the old track.
             const queue = displayedTracksRef.current;
             const idx = queue.findIndex((t) => t.file_path === event.payload.path);
             if (idx === -1) return;
+            maybeScrobble(currentTrackRef.current, currentTimeRef.current);
             setCurrentTime(0);
             setCurrentTrackIndex(idx);
             setCurrentTrack(queue[idx]);
+            invoke("increment_play_count", { filePath: event.payload.path }).catch(() => {});
         }).then((fn) => {
             if (disposed) fn();
             else unlistenChanged = fn;
@@ -329,24 +538,35 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             if (disposed) return;
             const filePath = event.payload;
             if (!filePath) return;
-            const miniTrack: Track = {
-                id: -1,
-                title: filePath.split(/[/\\]/).pop() || "Unknown",
-                artist: "",
-                album: "",
-                file_path: filePath,
-                cover_path: null,
-                duration_secs: 0,
-                format: filePath.split(".").pop()?.toUpperCase() || "",
-                sample_rate: 0,
-                bit_depth: 0,
-                channels: 2,
-                track_number: 0,
-                disc_number: 0,
-                play_count: 0,
-                genre: null,
-            };
-            void actionsRef.current.playTrack(miniTrack, [miniTrack]);
+            void (async () => {
+                try {
+                    // Register the file as a real library row so likes and
+                    // playlists get a stable id instead of the pseudo id:-1.
+                    const track = await invoke<Track>("add_external_track", { filePath });
+                    void actionsRef.current.playTrack(track, [track]);
+                    return;
+                } catch (err) {
+                    console.error("Failed to register external track:", err);
+                }
+                const miniTrack: Track = {
+                    id: -1,
+                    title: filePath.split(/[/\\]/).pop() || "Unknown",
+                    artist: "",
+                    album: "",
+                    file_path: filePath,
+                    cover_path: null,
+                    duration_secs: 0,
+                    format: filePath.split(".").pop()?.toUpperCase() || "",
+                    sample_rate: 0,
+                    bit_depth: 0,
+                    channels: 2,
+                    track_number: 0,
+                    disc_number: 0,
+                    play_count: 0,
+                    genre: null,
+                };
+                void actionsRef.current.playTrack(miniTrack, [miniTrack]);
+            })();
         }).then((fn) => {
             if (disposed) fn();
             else unlistenOpenFile = fn;
@@ -431,12 +651,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const setLibraryTracks = useCallback((tracks: Track[]) => {
         _setLibraryTracks(tracks);
-        if (displayedTracksRef.current.length === 0) _setDisplayedTracks(tracks);
+        // Refresh the default queue with the new library, but never stomp a
+        // user-built custom queue (open-file track, search result, reorder,
+        // shuffle) just because a scan or watcher event finished.
+        if (isDefaultQueueRef.current || displayedTracksRef.current.length === 0) {
+            _setDisplayedTracks(tracks);
+        }
     }, []);
 
     const setDisplayedTracks = useCallback((tracks: Track[]) => {
         _setDisplayedTracks(tracks);
     }, []);
+
+    const setQueueToLibrary = useCallback(() => {
+        isDefaultQueueRef.current = true;
+        _setDisplayedTracks(libraryTracks);
+    }, [libraryTracks]);
 
     const reorderQueue = useCallback((from: number, to: number) => {
         const prev = displayedTracksRef.current;
@@ -444,6 +674,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const next = [...prev];
         const [moved] = next.splice(from, 1);
         next.splice(to, 0, moved);
+        isDefaultQueueRef.current = false;
         _setDisplayedTracks(next);
         const currentId = currentTrackRef.current?.id;
         setCurrentTrackIndex(currentId === undefined ? -1 : next.findIndex((t) => t.id === currentId));
@@ -833,10 +1064,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         try {
             if (newQueue) {
                 preShuffleQueueRef.current = [...displayedTracksRef.current];
+                isDefaultQueueRef.current = false;
                 _setDisplayedTracks(newQueue);
                 const idx = newQueue.findIndex((t) => t.id === track.id);
                 setCurrentTrackIndex(idx !== -1 ? idx : 0);
             } else if (displayedTracksRef.current.length === 0) {
+                isDefaultQueueRef.current = false;
                 _setDisplayedTracks([track]);
                 setCurrentTrackIndex(0);
             }
@@ -911,6 +1144,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const toggleShuffle = useCallback(() => {
         const newShuffle = !isShuffle;
         setIsShuffle(newShuffle);
+        isDefaultQueueRef.current = false;
 
         if (newShuffle) {
             preShuffleQueueRef.current = [...displayedTracksRef.current];
@@ -1013,6 +1247,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 playTrack,
                 setLibraryTracks,
                 setDisplayedTracks,
+                setQueueToLibrary,
                 reorderQueue,
                 togglePlayPause,
                 toggleShuffle,
@@ -1020,6 +1255,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 stop,
                 playNext,
                 playPrev,
+                sleepTimerSeconds,
+                sleepRemainingMs,
+                setSleepTimer,
+                cancelSleepTimer,
+                replaygainMode,
+                setReplaygainMode,
+                scrobbleEnabled,
+                scrobbleToken,
+                setScrobbleEnabled,
+                setScrobbleToken,
             }}
         >
             {children}

@@ -67,6 +67,7 @@ export function SearchPalette({
 		};
 
 		const seenArtists = new Set<string>();
+		const seenAlbums = new Set<string>();
 		for (const t of tracks) {
 			if (
 				t.title.toLowerCase().includes(q) ||
@@ -97,14 +98,17 @@ export function SearchPalette({
 				}
 			}
 			if (t.album && t.album.toLowerCase().includes(q)) {
-				push({
-					key: `al-${t.album}`,
-					kind: "album",
-					title: t.album,
-					subtitle: `Album · ${t.artist}`,
-					cover: hasCover(t) ? convertFileSrc(t.cover_path!) : undefined,
-					value: t.album,
-				});
+				if (!seenAlbums.has(t.album.toLowerCase())) {
+					seenAlbums.add(t.album.toLowerCase());
+					push({
+						key: `al-${t.album}`,
+						kind: "album",
+						title: t.album,
+						subtitle: `Album · ${t.artist}`,
+						cover: hasCover(t) ? convertFileSrc(t.cover_path!) : undefined,
+						value: t.album,
+					});
+				}
 			}
 			if (t.genre && t.genre.toLowerCase().includes(q)) {
 				push({
@@ -178,7 +182,7 @@ export function SearchPalette({
 				initial={{ opacity: 0 }}
 				animate={{ opacity: 1 }}
 				exit={{ opacity: 0 }}
-				className="fixed inset-0 z-[2000] bg-black/70 flex justify-center pt-[12vh]"
+				className="fixed inset-0 z-[2000] bg-black-70 flex justify-center pt-[12vh]"
 				onMouseDown={actions.onClose}
 			>
 				<motion.div
@@ -186,7 +190,7 @@ export function SearchPalette({
 					animate={{ opacity: 1, scale: 1, y: 0 }}
 					exit={{ opacity: 0, scale: 0.95, y: 10 }}
 					transition={{ type: "spring", stiffness: 400, damping: 30 }}
-					className="w-[min(640px,90vw)] max-h-[62vh] bg-[#111] border border-border rounded-lg flex flex-col overflow-hidden"
+					className="w-[min(640px,90vw)] max-h-[62vh] bg-bg-elevated border border-border rounded-lg flex flex-col overflow-hidden"
 					onMouseDown={(e) => e.stopPropagation()}
 				>
 					<div className="flex items-center gap-3 px-5 py-4 border-b border-border">
@@ -220,7 +224,7 @@ export function SearchPalette({
 											return (
 											<motion.div
 												key={item.key}
-												className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${isActive ? "bg-white/5" : ""}`}
+												className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md cursor-pointer hover:bg-white-5 transition-colors ${isActive ? "bg-white-5" : ""}`}
 													data-active={isActive ? "" : undefined}
 													onMouseEnter={() => setActiveIdx(idx)}
 													onClick={() => activate(item)}

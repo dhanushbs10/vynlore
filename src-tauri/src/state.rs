@@ -14,6 +14,7 @@ pub struct AppState {
 	pub spectrum: Arc<SpectrumAnalyzer>,
 	pub balance: Arc<AtomicU32>,
 	pub preamp: Arc<AtomicU32>,
+	pub replaygain_mode: Arc<AtomicU32>,
 	pub cover_dir: PathBuf,
 }
 

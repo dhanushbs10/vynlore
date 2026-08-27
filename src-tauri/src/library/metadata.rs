@@ -10,31 +10,42 @@ pub fn infer_genre_from_path(file_path: &Path, folder_path: &Path) -> &'static s
     folder_path.to_string_lossy().to_lowercase()
   );
 
-  if haystack.contains("rock") || haystack.contains("alt-rock") || haystack.contains("punk") || haystack.contains("grunge") {
+  // Whole-token matching for single-word genres so a folder like "Rocket",
+  // "Trapdoor" or "Metallica" isn't mis-tagged as Rock/Hip-Hop/Metal merely
+  // because its name contains a genre word. Multi-word phrases (alt-rock,
+  // drum-and-bass, r&b, heavy-metal…) still match as contiguous substrings.
+  fn has_word(haystack: &str, token: &str) -> bool {
+    haystack
+      .split(|c: char| !c.is_alphanumeric())
+      .any(|w| w == token)
+  }
+  let has_phrase = |phrase: &str| haystack.contains(phrase);
+
+  if has_word(&haystack, "rock") || has_phrase("alt-rock") || has_word(&haystack, "punk") || has_word(&haystack, "grunge") {
     return "Rock";
   }
-  if haystack.contains("electronic") || haystack.contains("edm") || haystack.contains("techno") || haystack.contains("house") || haystack.contains("ambient") || haystack.contains("drum-and-bass") || haystack.contains("dubstep") {
+  if has_word(&haystack, "electronic") || has_word(&haystack, "edm") || has_word(&haystack, "techno") || has_word(&haystack, "house") || has_word(&haystack, "ambient") || has_phrase("drum-and-bass") || has_word(&haystack, "dubstep") {
     return "Electronic";
   }
-  if haystack.contains("jazz") || haystack.contains("soul") || haystack.contains("funk") || haystack.contains("blues") {
+  if has_word(&haystack, "jazz") || has_word(&haystack, "soul") || has_word(&haystack, "funk") || has_word(&haystack, "blues") {
     return "Jazz";
   }
-  if haystack.contains("classical") || haystack.contains("orchestra") || haystack.contains("piano") || haystack.contains("violin") || haystack.contains("opera") {
+  if has_word(&haystack, "classical") || has_word(&haystack, "orchestra") || has_word(&haystack, "piano") || has_word(&haystack, "violin") || has_word(&haystack, "opera") {
     return "Classical";
   }
-  if haystack.contains("hip-hop") || haystack.contains("rap") || haystack.contains("trap") || haystack.contains("r&b") || haystack.contains("rnb") {
+  if has_phrase("hip-hop") || has_word(&haystack, "rap") || has_word(&haystack, "trap") || has_phrase("r&b") || has_word(&haystack, "rnb") {
     return "Hip-Hop";
   }
-  if haystack.contains("pop") || haystack.contains("dance-pop") {
+  if has_word(&haystack, "pop") || has_phrase("dance-pop") {
     return "Pop";
   }
-  if haystack.contains("folk") || haystack.contains("acoustic") || haystack.contains("singer-songwriter") {
+  if has_word(&haystack, "folk") || has_word(&haystack, "acoustic") || has_phrase("singer-songwriter") {
     return "Folk";
   }
-  if haystack.contains("metal") || haystack.contains("heavy-metal") || haystack.contains("death-metal") || haystack.contains("black-metal") {
+  if has_word(&haystack, "metal") || has_phrase("heavy-metal") || has_phrase("death-metal") || has_phrase("black-metal") {
     return "Metal";
   }
-  if haystack.contains("country") || haystack.contains("bluegrass") {
+  if has_word(&haystack, "country") || has_word(&haystack, "bluegrass") {
     return "Country";
   }
 
@@ -56,6 +67,8 @@ pub struct TrackMetadata {
   pub disc_number: u32,
   pub cover_path: String,
   pub lyrics: String,
+  pub track_gain: Option<f64>,
+  pub track_peak: Option<f64>,
 }
 
 /// Extensions the scanner/watcher accept. Keep in sync with the enabled
@@ -98,7 +111,13 @@ pub fn read_metadata(path: &Path, cover_dir: &Path) -> Result<TrackMetadata, Box
   };
 
   let get_num = |key: ItemKey| -> u32 {
-    tag.get_string(&key).and_then(|s| s.parse().ok()).unwrap_or(0)
+    tag.get_string(&key)
+      .and_then(|s| {
+        // Tag values can be "3/15" (track no / total) — use the left-hand side.
+        let head = s.split('/').next().unwrap_or(&s).trim();
+        head.parse().ok().or_else(|| s.parse().ok())
+      })
+      .unwrap_or(0)
   };
 
   let props = tagged_file.properties();
@@ -137,8 +156,12 @@ pub fn read_metadata(path: &Path, cover_dir: &Path) -> Result<TrackMetadata, Box
     fs::create_dir_all(cover_dir)?;
     let out_path = cover_dir.join(format!("{:016x}.{}", hash, ext));
 
-    let mut file = fs::File::create(&out_path)?;
-    file.write_all(picture.data())?;
+    // Identical artwork (same content hash) is already on disk — skip the
+    // rewrite instead of churning the file on every scan.
+    if !out_path.exists() {
+      let mut file = fs::File::create(&out_path)?;
+      file.write_all(picture.data())?;
+    }
     cover_path = out_path.to_string_lossy().to_string();
   }
 
@@ -156,6 +179,8 @@ pub fn read_metadata(path: &Path, cover_dir: &Path) -> Result<TrackMetadata, Box
     disc_number: get_num(ItemKey::DiscNumber),
     cover_path,
     lyrics: get_lyrics(tag),
+    track_gain: None,
+    track_peak: None,
   })
 }
 

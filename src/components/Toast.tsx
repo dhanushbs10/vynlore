@@ -38,7 +38,7 @@ function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: 
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 40 }}
       transition={{ type: "spring", stiffness: 400, damping: 30 }}
-      className="pointer-events-auto flex items-center gap-2.5 px-4 py-3 min-w-[240px] max-w-[380px] bg-[#1a1a1a] border border-border rounded-lg text-text text-sm font-medium"
+      className="pointer-events-auto flex items-center gap-2.5 px-4 py-3 min-w-[240px] max-w-[380px] bg-bg-hover border border-border rounded-lg text-text text-sm font-medium"
     >
       <Music2 className="shrink-0 w-[18px] h-[18px] text-white" />
       <div className="flex flex-col gap-px min-w-0">

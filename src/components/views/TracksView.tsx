@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { usePlayer } from "../../context/PlayerContext";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { formatDuration, formatSampleRate, hasCover } from "../../utils/format";
+import { QualityBadge } from "../QualityBadge";
 import type { Track } from "../../types";
 
 export function TracksView({ tracks }: { tracks: Track[] }) {
@@ -37,7 +38,7 @@ export function TracksView({ tracks }: { tracks: Track[] }) {
 
       <div className="mb-5">
         <input
-          className="w-full max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-white/30 transition-colors"
+          className="w-full max-w-sm px-4 py-2.5 rounded-lg border border-border bg-bg-raised text-text text-sm placeholder:text-text-muted focus:outline-none focus:border-white-30 transition-colors"
           placeholder="Search tracks, artists, albums…"
           value={query}
           onChange={e => setQuery(e.target.value)}
@@ -100,7 +101,7 @@ function TrackRow({
 }) {
   return (
     <div
-      className={`grid grid-cols-[48px_40px_1fr_1fr_1fr_70px_70px_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${isActive ? "bg-white/5" : ""}`}
+      className={`grid grid-cols-[48px_40px_1fr_1fr_1fr_70px_70px_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white-5 transition-colors ${isActive ? "bg-white-5" : ""}`}
       onClick={() => playTrack(track, allTracks)}
     >
       <div className="w-12">
@@ -117,7 +118,7 @@ function TrackRow({
       <div className="text-sm text-text-secondary truncate">{track.artist}</div>
       <div className="text-sm text-text-secondary truncate">{track.album}</div>
       <div className="text-center">
-        <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold tracking-wider text-text-muted border border-border">{track.format || "FLAC"}</span>
+        <QualityBadge track={track} />
       </div>
       <div className="text-sm text-text-secondary truncate">{formatSampleRate(track.sample_rate)}</div>
       <div className="text-sm text-text-muted tabular-nums text-right">{formatDuration(track.duration_secs)}</div>

@@ -4,8 +4,9 @@ use std::path::Path;
 pub const UPSERT_TRACK_SQL: &str = "INSERT INTO tracks (
         file_path, title, artist, album, genre,
         sample_rate, bit_depth, channels, duration_secs,
-        track_number, disc_number, watched_folder, cover_path, lyrics, format
-      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        track_number, disc_number, watched_folder, cover_path, lyrics, format,
+        track_gain, track_peak
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
       ON CONFLICT(file_path) DO UPDATE SET
         title=excluded.title,
         artist=excluded.artist,
@@ -19,7 +20,9 @@ pub const UPSERT_TRACK_SQL: &str = "INSERT INTO tracks (
         disc_number=excluded.disc_number,
         cover_path=excluded.cover_path,
         lyrics=excluded.lyrics,
-        format=excluded.format";
+        format=excluded.format,
+        track_gain=COALESCE(excluded.track_gain, tracks.track_gain),
+        track_peak=COALESCE(excluded.track_peak, tracks.track_peak)";
 
 pub struct LibraryDb {
   pub conn: Connection,
@@ -47,7 +50,7 @@ pub type TrackRow = (
   i64,
 );
 
-fn map_track_row(
+pub(crate) fn map_track_row(
   row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<TrackRow> {
   Ok((
@@ -73,7 +76,9 @@ fn map_track_row(
 impl LibraryDb {
   pub fn new(path: &Path) -> Result<Self> {
     let conn = Connection::open(path)?;
-    conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+    // Enforce referential integrity so stale / orphan playlist links can't
+    // accumulate, and so fresh databases benefit from ON DELETE CASCADE.
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
     conn.execute_batch(
       "CREATE TABLE IF NOT EXISTS tracks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,6 +122,20 @@ impl LibraryDb {
     if let Err(e) = conn.execute("ALTER TABLE tracks ADD COLUMN waveform BLOB", []) {
       eprintln!("[db] migration warning: {}", e);
     }
+    if let Err(e) = conn.execute("ALTER TABLE tracks ADD COLUMN track_gain REAL", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE tracks ADD COLUMN track_peak REAL", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute("ALTER TABLE tracks ADD COLUMN album_gain REAL", []) {
+      eprintln!("[db] migration warning: {}", e);
+    }
+    if let Err(e) = conn.execute_batch(
+      "CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album, album_gain);",
+    ) {
+      eprintln!("[db] migration warning: {}", e);
+    }
     if let Err(e) = conn.execute_batch(
       "CREATE INDEX IF NOT EXISTS idx_tracks_last_played ON tracks(last_played);",
     ) {
@@ -158,10 +177,20 @@ impl LibraryDb {
         playlist_id INTEGER,
         track_id INTEGER,
         position INTEGER,
-        FOREIGN KEY(playlist_id) REFERENCES playlists(id),
-        FOREIGN KEY(track_id) REFERENCES tracks(id)
+        FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+        FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
       );",
     )?;
+
+    // One-time cleanup of orphaned playlist links left behind by old builds
+    // that predate foreign-key enforcement / cascade deletes.
+    if let Err(e) = conn.execute_batch(
+      "DELETE FROM playlist_tracks WHERE playlist_id NOT IN (SELECT id FROM playlists);
+       DELETE FROM playlist_tracks WHERE track_id NOT IN (SELECT id FROM tracks);",
+    ) {
+      eprintln!("[db] orphan cleanup warning: {}", e);
+    }
+
     Ok(Self { conn })
   }
 
@@ -196,12 +225,14 @@ impl LibraryDb {
   }
 
   /// Removes a single track row by its file path (used when the watcher sees
-  /// a delete). Playlist links cascade.
+  /// a delete). Referencing playlist links are cleared first so the delete
+  /// works both with and without ON DELETE CASCADE in the schema.
   pub fn remove_track_by_path(&self, file_path: &str) -> Result<usize> {
-    let removed = self
-      .conn
-      .execute("DELETE FROM tracks WHERE file_path = ?1", [file_path])?;
-    Ok(removed)
+    self.conn.execute(
+      "DELETE FROM playlist_tracks WHERE track_id IN (SELECT id FROM tracks WHERE file_path = ?1)",
+      [file_path],
+    )?;
+    self.conn.execute("DELETE FROM tracks WHERE file_path = ?1", [file_path])
   }
 
   /// Drops rows whose file no longer exists on disk — cleans up files that
@@ -217,7 +248,7 @@ impl LibraryDb {
     for p in &paths {
       if let Err(e) = std::fs::metadata(p) {
         if e.kind() == std::io::ErrorKind::NotFound {
-          self.conn.execute("DELETE FROM tracks WHERE file_path = ?1", [p])?;
+          self.remove_track_by_path(p)?;
           removed += 1;
         }
       }
@@ -225,13 +256,108 @@ impl LibraryDb {
     Ok(removed)
   }
 
-  pub fn create_playlist(&self, name: &str) -> Result<i64> {
-    self.conn.execute("INSERT INTO playlists (name) VALUES (?1)", [name])?;
+  /// Fetches a single track row by its unique file path.
+  pub fn get_track_by_path(&self, file_path: &str) -> Result<Option<TrackRow>> {
+    let mut stmt = self.conn.prepare(
+      "SELECT id, file_path, title, artist, album, genre,
+              sample_rate, bit_depth, channels, duration_secs,
+              COALESCE(track_number, 0), COALESCE(disc_number, 0), COALESCE(cover_path,''), COALESCE(lyrics,''),
+              COALESCE(NULLIF(format,''), 'FLAC'), COALESCE(play_count, 0)
+       FROM tracks WHERE file_path = ?1",
+    )?;
+    let mut rows = stmt.query_map([file_path], map_track_row)?;
+    match rows.next() {
+      Some(Ok(row)) => Ok(Some(row)),
+      Some(Err(e)) => Err(e),
+      None => Ok(None),
+    }
+  }
+
+  /// ReplayGain values for a track: (track_gain, album_gain, track_peak).
+  pub fn get_replaygain(&self, file_path: &str) -> Result<(Option<f64>, Option<f64>, Option<f64>)> {
+    let mut stmt = self.conn.prepare(
+      "SELECT track_gain, album_gain, track_peak FROM tracks WHERE file_path = ?1",
+    )?;
+    let mut rows = stmt.query_map([file_path], |r| {
+      Ok((
+        r.get::<_, Option<f64>>(0)?,
+        r.get::<_, Option<f64>>(1)?,
+        r.get::<_, Option<f64>>(2)?,
+      ))
+    })?;
+    match rows.next() {
+      Some(Ok(row)) => Ok(row),
+      Some(Err(e)) => Err(e),
+      None => Ok((None, None, None)),
+    }
+  }
+
+  /// Deletes every track that belongs to a different watched folder. Called
+  /// after a successful folder scan so switching folders (or a changed
+  /// configured folder at startup) doesn't leave stale rows from the old one.
+  pub fn remove_tracks_not_in_folder(&self, folder: &str) -> Result<usize> {
+    let target = Self::normalize_folder_key(folder);
+    let folders: Vec<String> = {
+      let mut stmt = self.conn.prepare(
+        "SELECT DISTINCT watched_folder FROM tracks WHERE watched_folder IS NOT NULL AND watched_folder != ''",
+      )?;
+      let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+      let mut out = Vec::new();
+      for r in rows {
+        out.push(r?);
+      }
+      out
+    };
+    let mut removed = 0;
+    for f in folders {
+      if Self::normalize_folder_key(&f) != target {
+        removed += self.remove_tracks_in_folder(&f)?;
+      }
+    }
+    Ok(removed)
+  }
+
+  fn remove_tracks_in_folder(&self, folder: &str) -> Result<usize> {
+    self.conn.execute(
+      "DELETE FROM playlist_tracks WHERE track_id IN (SELECT id FROM tracks WHERE watched_folder = ?1)",
+      [folder],
+    )?;
+    self.conn.execute("DELETE FROM tracks WHERE watched_folder = ?1", [folder])
+  }
+
+  fn normalize_folder_key(f: &str) -> String {
+    let s = f.trim().trim_end_matches(['/', '\\']);
+    let s = s.strip_prefix(r"\\?\").unwrap_or(s);
+    s.to_lowercase()
+  }
+
+  pub fn create_playlist(&self, name: &str) -> Result<i64, String> {
+    if name.eq_ignore_ascii_case("Liked Songs") {
+      return Err("'Liked Songs' is a reserved playlist name".into());
+    }
+    self.conn
+      .execute("INSERT INTO playlists (name) VALUES (?1)", [name])
+      .map_err(|e| e.to_string())?;
     Ok(self.conn.last_insert_rowid())
   }
 
-  pub fn rename_playlist(&self, playlist_id: i64, name: &str) -> Result<()> {
-    self.conn.execute("UPDATE playlists SET name = ?1 WHERE id = ?2", [name, &playlist_id.to_string()])?;
+  pub fn rename_playlist(&self, playlist_id: i64, name: &str) -> Result<(), String> {
+    if name.eq_ignore_ascii_case("Liked Songs") {
+      return Err("'Liked Songs' is a reserved playlist name".into());
+    }
+    let current: Option<String> = self
+      .conn
+      .query_row("SELECT name FROM playlists WHERE id = ?1", [playlist_id], |r| {
+        r.get(0)
+      })
+      .map_err(|e| e.to_string())?;
+    if current.as_deref().is_some_and(|n| n.eq_ignore_ascii_case("Liked Songs")) {
+      return Err("'Liked Songs' cannot be renamed".into());
+    }
+    self
+      .conn
+      .execute("UPDATE playlists SET name = ?1 WHERE id = ?2", [name, &playlist_id.to_string()])
+      .map_err(|e| e.to_string())?;
     Ok(())
   }
 
@@ -435,7 +561,9 @@ impl LibraryDb {
         Ok(Some(r.get::<_, String>(0)?))
       })
     {
-      if name == "Liked Songs" {
+      // Only the system-created "Liked Songs" playlist is protected; create /
+      // rename now reject that name, so no user playlist can ever claim it.
+      if name.eq_ignore_ascii_case("Liked Songs") {
         return Ok(());
       }
     }

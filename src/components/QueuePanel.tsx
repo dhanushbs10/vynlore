@@ -69,7 +69,7 @@ export function QueuePanel({ displayedTracks, currentTrackIndex, playTrack }: Qu
             <div className="px-5 pt-6 pb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-text-muted">Up Next</div>
             <div className="flex-1 overflow-y-auto px-3 pb-3">
                 {safeIndex >= 0 && safeIndex < displayedTracks.length && (
-                    <div className="px-3 py-2 rounded-lg bg-white/5 mb-1">
+                    <div className="px-3 py-2 rounded-lg bg-white-5 mb-1">
                         <div className="text-[10px] font-semibold uppercase tracking-wider text-white mb-0.5">Now Playing</div>
                         <div className="text-sm font-medium text-text truncate">{displayedTracks[safeIndex].title}</div>
                         <div className="text-xs text-text-muted truncate mt-0.5">{displayedTracks[safeIndex].artist}</div>

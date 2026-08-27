@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
 
   --color-bg: #000000;
   --color-bg-raised: #0d0d0d;
@@ -11,11 +11,11 @@
   --color-bg-hover: #1a1a1a;
   --color-bg-elevated: #111111;
 
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-border-hover: rgba(255, 255, 255, 0.15);
+  --color-border: var(--color-white-8);
+  --color-border-hover: var(--color-white-15);
 
   --color-accent: #ffffff;
-  --color-accent-glow: rgba(255, 255, 255, 0);
+  --color-accent-glow: transparent;
 
   --color-text: #ffffff;
   --color-text-secondary: #888888;
@@ -23,6 +23,44 @@
 
   --color-success: #34d399;
   --color-danger: #f87171;
+
+  /* ── Theme-aware alpha layers ─────────────────────────────
+     Derived from --color-white / --color-black so that skins can
+     re-tint every white/NN usage just by overriding those two vars. */
+  --color-white-1: color-mix(in srgb, var(--color-white) 1%, transparent);
+  --color-white-2: color-mix(in srgb, var(--color-white) 2%, transparent);
+  --color-white-3: color-mix(in srgb, var(--color-white) 3%, transparent);
+  --color-white-4: color-mix(in srgb, var(--color-white) 4%, transparent);
+  --color-white-5: color-mix(in srgb, var(--color-white) 5%, transparent);
+  --color-white-6: color-mix(in srgb, var(--color-white) 6%, transparent);
+  --color-white-7: color-mix(in srgb, var(--color-white) 7%, transparent);
+  --color-white-8: color-mix(in srgb, var(--color-white) 8%, transparent);
+  --color-white-10: color-mix(in srgb, var(--color-white) 10%, transparent);
+  --color-white-12: color-mix(in srgb, var(--color-white) 12%, transparent);
+  --color-white-15: color-mix(in srgb, var(--color-white) 15%, transparent);
+  --color-white-20: color-mix(in srgb, var(--color-white) 20%, transparent);
+  --color-white-25: color-mix(in srgb, var(--color-white) 25%, transparent);
+  --color-white-30: color-mix(in srgb, var(--color-white) 30%, transparent);
+  --color-white-35: color-mix(in srgb, var(--color-white) 35%, transparent);
+  --color-white-40: color-mix(in srgb, var(--color-white) 40%, transparent);
+  --color-white-45: color-mix(in srgb, var(--color-white) 45%, transparent);
+  --color-white-50: color-mix(in srgb, var(--color-white) 50%, transparent);
+  --color-white-55: color-mix(in srgb, var(--color-white) 55%, transparent);
+  --color-white-60: color-mix(in srgb, var(--color-white) 60%, transparent);
+  --color-white-65: color-mix(in srgb, var(--color-white) 65%, transparent);
+  --color-white-70: color-mix(in srgb, var(--color-white) 70%, transparent);
+  --color-white-75: color-mix(in srgb, var(--color-white) 75%, transparent);
+  --color-white-80: color-mix(in srgb, var(--color-white) 80%, transparent);
+  --color-white-85: color-mix(in srgb, var(--color-white) 85%, transparent);
+  --color-white-90: color-mix(in srgb, var(--color-white) 90%, transparent);
+
+  --color-black-30: color-mix(in srgb, var(--color-black) 30%, transparent);
+  --color-black-40: color-mix(in srgb, var(--color-black) 40%, transparent);
+  --color-black-45: color-mix(in srgb, var(--color-black) 45%, transparent);
+  --color-black-50: color-mix(in srgb, var(--color-black) 50%, transparent);
+  --color-black-60: color-mix(in srgb, var(--color-black) 60%, transparent);
+  --color-black-70: color-mix(in srgb, var(--color-black) 70%, transparent);
+  --color-black-90: color-mix(in srgb, var(--color-black) 90%, transparent);
 }
 
 html, body, #root {
@@ -35,17 +73,17 @@ html, body, #root {
 }
 
 ::selection {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--color-white-20);
   color: var(--color-text);
 }
 
 * { scrollbar-width: thin; scrollbar-color: transparent transparent; }
-*:hover { scrollbar-color: rgba(255,255,255,0.1) transparent; }
+*:hover { scrollbar-color: var(--color-white-10) transparent; }
 *::-webkit-scrollbar { width: 5px; height: 5px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }
-*:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); }
-*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+*:hover::-webkit-scrollbar-thumb { background: var(--color-white-8); }
+*::-webkit-scrollbar-thumb:hover { background: var(--color-white-15); }
 
 .eq-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
 .eq-bars::before, .eq-bars::after {
@@ -62,20 +100,20 @@ input[type=range] {
   background: transparent; cursor: pointer;
 }
 input[type=range]::-webkit-slider-runnable-track {
-  height: 3px; background: rgba(255,255,255,0.12); border-radius: 1px;
+  height: 3px; background: var(--color-white-12); border-radius: 1px;
 }
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 12px; height: 12px; border-radius: 50%;
-  background: #ffffff; margin-top: -4.5px;
+  background: var(--color-white); margin-top: -4.5px;
   box-shadow: none;
 }
 input[type=range]::-moz-range-track {
-  height: 3px; background: rgba(255,255,255,0.12); border: none; border-radius: 1px;
+  height: 3px; background: var(--color-white-12); border: none; border-radius: 1px;
 }
 input[type=range]::-moz-range-thumb {
   width: 12px; height: 12px; border-radius: 50%; border: none;
-  background: #ffffff;
+  background: var(--color-white);
   box-shadow: none;
 }
 
@@ -95,23 +133,23 @@ input[type=range].eq-fader::-webkit-slider-thumb {
   width: 14px;
   height: 8px;
   border-radius: 2px;
-  background: rgba(255,255,255,0.5);
+  background: var(--color-white-50);
   box-shadow: none;
   transition: background 0.15s;
 }
 input[type=range].eq-fader:hover::-webkit-slider-thumb {
-  background: #ffffff;
+  background: var(--color-white);
 }
 input[type=range].eq-fader::-moz-range-thumb {
   width: 14px;
   height: 8px;
   border-radius: 2px;
-  background: rgba(255,255,255,0.5);
+  background: var(--color-white-50);
   box-shadow: none;
   border: none;
 }
 input[type=range].eq-fader:hover::-moz-range-thumb {
-  background: #ffffff;
+  background: var(--color-white);
 }
 
 /* ── Vertical master fader ───────────────────────── */
@@ -130,21 +168,21 @@ input[type=range].eq-fader-master::-webkit-slider-thumb {
   width: 22px;
   height: 10px;
   border-radius: 2px;
-  background: rgba(255,255,255,0.65);
+  background: var(--color-white-65);
   box-shadow: none;
   transition: background 0.15s;
 }
 input[type=range].eq-fader-master:hover::-webkit-slider-thumb {
-  background: #ffffff;
+  background: var(--color-white);
 }
 input[type=range].eq-fader-master::-moz-range-thumb {
   width: 22px;
   height: 10px;
   border-radius: 2px;
-  background: rgba(255,255,255,0.65);
+  background: var(--color-white-65);
   box-shadow: none;
   border: none;
 }
 input[type=range].eq-fader-master:hover::-moz-range-thumb {
-  background: #ffffff;
+  background: var(--color-white);
 }

@@ -56,7 +56,7 @@ export function SpectrumBars({ bars = 64, className = "" }: Props) {
           className="flex-1 rounded-t-sm min-w-[2px] max-w-[6px]"
           style={{
             height: `${Math.max(3, v * 100)}%`,
-            backgroundColor: `rgba(255, 255, 255, ${0.15 + v * 0.75})`,
+            backgroundColor: `color-mix(in srgb, var(--color-white) ${Math.round((0.15 + v * 0.75) * 100)}%, transparent)`,
             transition: "height 50ms ease-out",
           }}
         />

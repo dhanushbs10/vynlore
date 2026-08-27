@@ -148,7 +148,7 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
           style={coverPath
             ? undefined
             : playlistColor
-              ? { background: `linear-gradient(135deg, ${playlistColor}, ${playlistColor}88, rgba(0,0,0,0.4))` }
+              ? { background: `linear-gradient(135deg, ${playlistColor}, ${playlistColor}88, color-mix(in srgb, var(--color-black) 40%, transparent))` }
               : { background: "var(--color-bg-surface)" }
           }
           onClick={handleUploadCover}
@@ -159,7 +159,7 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
           ) : (
             <span>♪</span>
           )}
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="absolute inset-0 bg-black-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <ImagePlus size={20} className="text-white" />
           </div>
         </div>
@@ -167,7 +167,7 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
           {isEditing ? (
             <input
               ref={editInputRef}
-              className="font-display text-2xl font-bold text-text tracking-tight bg-transparent border-b border-white/30 outline-none w-full"
+              className="font-display text-2xl font-bold text-text tracking-tight bg-transparent border-b border-white-30 outline-none w-full"
               value={editingName}
               onChange={(e) => setEditingName(e.target.value)}
               onKeyDown={(e) => {
@@ -193,22 +193,22 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
           <div className="relative" ref={colorPickerRef}>
             <button
               onClick={() => setShowColorPicker(!showColorPicker)}
-              className="w-8 h-8 rounded-md border border-border flex items-center justify-center cursor-pointer hover:bg-white/5 transition-colors"
+              className="w-8 h-8 rounded-md border border-border flex items-center justify-center cursor-pointer hover:bg-white-5 transition-colors"
               title="Change color"
             >
               <div
-                className="w-4 h-4 rounded-full border border-white/20"
+                className="w-4 h-4 rounded-full border border-white-20"
                 style={playlistColor ? { background: playlistColor } : { background: "linear-gradient(135deg, #fff, #888)" }}
               />
             </button>
             {showColorPicker && (
-              <div className="absolute top-full right-0 mt-2 bg-[#111] border border-border rounded-lg p-3 z-[50] shadow-2xl shadow-black/60">
+              <div className="absolute top-full right-0 mt-2 bg-bg-elevated border border-border rounded-lg p-3 z-[50] shadow-2xl shadow-black-60">
                 <div className="grid grid-cols-4 gap-2">
                   {PRESET_COLORS.map((c) => (
                     <button
                       key={c}
                       onClick={() => handleSetColor(c)}
-                      className={`w-7 h-7 rounded-full cursor-pointer border-2 transition-all hover:scale-110 ${playlistColor === c ? "border-white scale-110" : "border-white/20"}`}
+                      className={`w-7 h-7 rounded-full cursor-pointer border-2 transition-all hover:scale-110 ${playlistColor === c ? "border-white scale-110" : "border-white-20"}`}
                       style={{ background: c }}
                     />
                   ))}
@@ -225,7 +225,7 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
             )}
           </div>
           <motion.button
-            className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white/5 hover:text-text transition-colors w-auto"
+            className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white-5 hover:text-text transition-colors w-auto"
             onClick={handleShuffle}
             whileTap={{ scale: 0.95 }}
             aria-label="Shuffle"
@@ -271,7 +271,7 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
             return (
               <div
                 key={track.id}
-                className={`grid grid-cols-[48px_40px_1fr_1fr_70px_40px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${active ? "bg-white/5" : ""}`}
+                className={`grid grid-cols-[48px_40px_1fr_1fr_70px_40px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white-5 transition-colors ${active ? "bg-white-5" : ""}`}
                 onClick={() => playTrack(track, tracks)}
               >
                 <div className="w-12">

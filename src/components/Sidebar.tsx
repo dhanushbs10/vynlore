@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { Search, SlidersHorizontal, Home, Library, Disc3, Users, Mic2, ListMusic } from "lucide-react";
+import { Search, SlidersHorizontal, Home, Library, Disc3, Users, Mic2, ListMusic, Settings } from "lucide-react";
 
 import type { AudioDevice } from "../types";
 import type { View } from "../App";
@@ -10,15 +10,17 @@ interface Props {
   currentView: View;
   onNavClick: (view: View) => void;
   scanning: boolean;
+  scanProgress?: { scanned: number; total: number | null } | null;
   hasFolder: boolean;
   onOpenSearch?: () => void;
   onToggleEq?: () => void;
+  onOpenSettings?: () => void;
   devices?: AudioDevice[];
   selectedDevice?: number | null;
   onSelectDevice?: (index: number) => void;
 }
 
-export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanning, hasFolder, onOpenSearch, onToggleEq, devices, selectedDevice, onSelectDevice }: Props) {
+export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanning, scanProgress, hasFolder, onOpenSearch, onToggleEq, onOpenSettings, devices, selectedDevice, onSelectDevice }: Props) {
   const mainItems: { label: string; view: View; icon: typeof Home }[] = [
     { label: "Home", view: "now", icon: Home },
     { label: "Library", view: "browse", icon: Library },
@@ -62,7 +64,7 @@ export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanni
       {devices && devices.length > 1 && onSelectDevice && (
         <div className="w-[calc(100%-28px)] mx-3.5 mb-3">
           <select
-            className="w-full px-3 py-2 rounded-lg border border-border bg-bg-raised text-text text-xs cursor-pointer focus:outline-none focus:border-white/30 transition-colors appearance-none"
+            className="w-full px-3 py-2 rounded-lg border border-border bg-bg-raised text-text text-xs cursor-pointer focus:outline-none focus:border-white-30 transition-colors appearance-none"
             value={selectedDevice ?? ""}
             onChange={(e) => onSelectDevice(Number(e.target.value))}
           >
@@ -82,7 +84,7 @@ export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanni
               key={item.view}
               className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13.5px] font-medium cursor-pointer transition-colors select-none ${
                 isActive
-                  ? "bg-white/5 text-white"
+                  ? "bg-white-5 text-white"
                   : "text-text-secondary hover:bg-bg-hover hover:text-text"
               }`}
               onClick={() => handleClick(item.view)}
@@ -94,7 +96,49 @@ export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanni
         })}
       </ul>
 
-      <div className="p-3 border-t border-border flex gap-2">
+      {onOpenSettings && (
+        <button
+          className="flex items-center gap-2.5 mx-3.5 mb-[40px] px-3 py-2 rounded-lg text-[13.5px] font-medium text-text-secondary hover:bg-bg-hover hover:text-text transition-colors cursor-pointer select-none text-left w-[calc(100%-28px)]"
+          onClick={onOpenSettings}
+          aria-label="Settings"
+        >
+          <Settings size={16} strokeWidth={1.9} />
+          <span>Settings</span>
+        </button>
+      )}
+
+      {scanning && scanProgress && (
+        <div className="px-3.5 pb-1.5">
+          {scanProgress.total ? (
+            <div className="h-1 w-full bg-bg-surface rounded-full overflow-hidden">
+              <div
+                className="h-full bg-white-70 rounded-full transition-[width] duration-300"
+                style={{ width: `${Math.min(100, (scanProgress.scanned / scanProgress.total) * 100)}%` }}
+              />
+            </div>
+          ) : (
+            <div className="h-1 w-full bg-bg-surface rounded-full overflow-hidden">
+              <div className="h-full w-1/3 bg-white-70 rounded-full animate-pulse" />
+            </div>
+          )}
+          <div className="text-[10px] text-text-muted mt-1.5">
+            Scanning… {scanProgress.scanned.toLocaleString()}
+            {scanProgress.total ? ` / ${scanProgress.total.toLocaleString()}` : ""}
+          </div>
+        </div>
+      )}
+
+      <div className="p-3 border-t border-border flex gap-2 items-stretch">
+        {onOpenSettings && (
+          <button
+            className="py-2 px-2.5 border border-border text-sm font-medium text-text-secondary cursor-pointer hover:text-text transition-colors"
+            onClick={onOpenSettings}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Settings size={14} />
+          </button>
+        )}
         <button
           disabled={scanning}
           className="flex-1 py-2 px-3 border border-border text-sm font-medium text-text-secondary cursor-pointer hover:text-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -106,6 +150,7 @@ export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanni
           <button
             className="py-2 px-2.5 border border-border text-sm font-medium text-text-secondary cursor-pointer hover:text-text transition-colors"
             onClick={onRescan}
+            title="Rescan music folder"
           >
             ↻
           </button>

@@ -10,18 +10,14 @@ pub const MIN_BAND_COUNT: usize = 5;
 pub const MAX_BAND_COUNT: usize = 32;
 pub const DEFAULT_Q: f32 = 1.1;
 
-/// Generate log-spaced frequency distribution for `count` bands.
-pub fn default_bands(count: usize) -> Vec<f32> {
-	let c = count.max(2);
-	let log_min = 31.0_f32.log10();
-	let log_max = 16000.0_f32.log10();
-	(0..c)
-		.map(|i| {
-			let t = i as f32 / (c - 1) as f32;
-			10f32.powf(log_min + t * (log_max - log_min))
-		})
-		.collect()
-}
+/// Coefficient ramp time-constant (~8ms): long enough to be inaudible, short
+/// enough that slider changes don't lag the hand.
+const SMOOTH_TC: f64 = 0.008;
+/// Limiter release time constant (~350ms) so the gain eases back slowly and
+/// doesn't pump; the attack is effectively instant (envelope follows peaks).
+const LIMITER_RELEASE_TC: f64 = 0.35;
+/// Limiter gain adjustment smoothing (~12ms) so gain tweaks glide, no zipper.
+const LIMITER_GAIN_TC: f64 = 0.012;
 
 #[derive(Clone, Debug)]
 pub struct EqSettings {
@@ -74,9 +70,21 @@ struct Coeffs {
 	a2: f64,
 }
 
-#[derive(Clone, Copy)]
+impl Coeffs {
+	#[inline(always)]
+	fn step_toward(&mut self, target: &Coeffs, step: f64) {
+		self.b0 += (target.b0 - self.b0) * step;
+		self.b1 += (target.b1 - self.b1) * step;
+		self.b2 += (target.b2 - self.b2) * step;
+		self.a1 += (target.a1 - self.a1) * step;
+		self.a2 += (target.a2 - self.a2) * step;
+	}
+}
+
 struct Biquad {
 	c: Coeffs,
+	target: Coeffs,
+	step: f64,
 	x1: f64,
 	x2: f64,
 	y1: f64,
@@ -84,12 +92,27 @@ struct Biquad {
 }
 
 impl Biquad {
-	fn new(c: Coeffs) -> Self {
-		Self { c, x1: 0.0, x2: 0.0, y1: 0.0, y2: 0.0 }
+	fn new(c: Coeffs, step: f64) -> Self {
+		Self {
+			c,
+			target: c,
+			step,
+			x1: 0.0,
+			x2: 0.0,
+			y1: 0.0,
+			y2: 0.0,
+		}
+	}
+
+	fn set_target(&mut self, c: Coeffs) {
+		self.target = c;
 	}
 
 	#[inline]
 	fn process(&mut self, x: f64) -> f64 {
+		// Ramp coefficients toward the target one sample at a time; a
+		// single-sample coefficient jump (zipper) becomes an inaudible glide.
+		self.c.step_toward(&self.target, self.step);
 		let y = self.c.b0 * x
 			+ self.c.b1 * self.x1
 			+ self.c.b2 * self.x2
@@ -104,6 +127,8 @@ impl Biquad {
 }
 
 fn design_band(f0: f32, gain_db: f32, q: f32, is_first: bool, is_last: bool, sample_rate: u32) -> Coeffs {
+	let f0 = if f0.is_finite() && f0 > 0.0 { f0 } else { 100.0 };
+	let q_f64 = if q.is_finite() && q > 0.05 { q as f64 } else { DEFAULT_Q as f64 };
 	if gain_db.abs() < 0.05 {
 		return Coeffs { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
 	}
@@ -114,14 +139,17 @@ fn design_band(f0: f32, gain_db: f32, q: f32, is_first: bool, is_last: bool, sam
 		return design_shelf(f0, gain_db, sample_rate, true);
 	}
 
-	let f0_f64 = (f0 as f64).min(sample_rate as f64 * 0.45);
+	peaking(f0, gain_db, q_f64, sample_rate)
+}
+
+fn peaking(f0: f32, gain_db: f32, q: f64, sample_rate: u32) -> Coeffs {
+	let f0_f64 = f0 as f64;
+	let f0_f64 = f0_f64.min(sample_rate as f64 * 0.45);
 	let a = 10f64.powf(gain_db as f64 / 20.0);
 	let w0 = 2.0 * std::f64::consts::PI * f0_f64 / sample_rate as f64;
 	let (sin_w0, cos_w0) = w0.sin_cos();
-	let q_f64 = q as f64;
 
-	// Peaking
-	let alpha = sin_w0 / (2.0 * q_f64);
+	let alpha = sin_w0 / (2.0 * q);
 	let b0 = 1.0 + alpha * a;
 	let b1 = -2.0 * cos_w0;
 	let b2 = 1.0 - alpha * a;
@@ -133,6 +161,7 @@ fn design_band(f0: f32, gain_db: f32, q: f32, is_first: bool, is_last: bool, sam
 }
 
 fn design_shelf(f0: f32, gain_db: f32, sample_rate: u32, high: bool) -> Coeffs {
+	let f0 = if f0.is_finite() && f0 > 0.0 { f0 } else { 100.0 };
 	let f0_f64 = (f0 as f64).min(sample_rate as f64 * 0.45);
 	let a = 10f64.powf(gain_db as f64 / 20.0);
 	let w0 = 2.0 * std::f64::consts::PI * f0_f64 / sample_rate as f64;
@@ -165,6 +194,60 @@ fn design_shelf(f0: f32, gain_db: f32, sample_rate: u32, high: bool) -> Coeffs {
 	Coeffs { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
 }
 
+/// Stereo-linked soft peak limiter. Prevents EQ boosts from ever reaching the
+/// hard clipping stage; attack is instant (envelope follows the peak), release
+/// is slow so the gain eases back without pumping.
+struct Limiter {
+	env: f64,
+	gain: f64,
+	release_step: f64,
+	gain_step: f64,
+}
+
+impl Limiter {
+	fn new(sample_rate: u32) -> Self {
+		let fs = sample_rate.max(1) as f64;
+		Self {
+			env: 0.0,
+			gain: 1.0,
+			release_step: 1.0 - (-1.0 / (LIMITER_RELEASE_TC * fs)).exp(),
+			gain_step: 1.0 - (-1.0 / (LIMITER_GAIN_TC * fs)).exp(),
+		}
+	}
+
+	fn reset(&mut self) {
+		self.env = 0.0;
+		self.gain = 1.0;
+	}
+
+	/// Applies limiting across one interleaved frame (all channels), returns
+	/// the clipped-to-range samples.
+	fn process_frame(&mut self, frame: &mut [f64]) {
+		let mut peak: f64 = 0.0;
+		for v in frame.iter() {
+			let a = v.abs();
+			if a > peak {
+				peak = a;
+			}
+		}
+		// Instant attack: envelope jumps up with the peak; slow release.
+		if peak > self.env {
+			self.env = peak;
+		} else {
+			self.env += (peak - self.env) * self.release_step;
+		}
+		let desired = if self.env > 1.0 { 1.0 / self.env } else { 1.0 };
+		if desired < self.gain {
+			self.gain = desired; // instant cut
+		} else {
+			self.gain += (desired - self.gain) * self.gain_step; // glide back
+		}
+		for v in frame.iter_mut() {
+			*v *= self.gain;
+		}
+	}
+}
+
 pub struct EqProcessor {
 	settings: SharedEq,
 	sample_rate: u32,
@@ -172,11 +255,12 @@ pub struct EqProcessor {
 	band_filters: Vec<Vec<Biquad>>,
 	bass_filters: Vec<Biquad>,
 	treble_filters: Vec<Biquad>,
+	limiter: Limiter,
 	cached_rate: u32,
+	cached_parametric: bool,
 	cached_gains: Vec<f32>,
 	cached_qs: Vec<f32>,
 	cached_band_hz: Vec<f32>,
-	cached_parametric: bool,
 	cached_bass: f32,
 	cached_treble: f32,
 }
@@ -190,11 +274,12 @@ impl EqProcessor {
 			band_filters: Vec::new(),
 			bass_filters: Vec::new(),
 			treble_filters: Vec::new(),
+			limiter: Limiter::new(sample_rate),
 			cached_rate: 0,
+			cached_parametric: false,
 			cached_gains: Vec::new(),
 			cached_qs: Vec::new(),
 			cached_band_hz: Vec::new(),
-			cached_parametric: false,
 			cached_bass: f32::NAN,
 			cached_treble: f32::NAN,
 		}
@@ -203,95 +288,92 @@ impl EqProcessor {
 	pub fn reset(&mut self) {
 		for ch in &mut self.band_filters {
 			for bq in ch {
-				bq.x1 = 0.0; bq.x2 = 0.0; bq.y1 = 0.0; bq.y2 = 0.0;
+				bq.x1 = 0.0;
+				bq.x2 = 0.0;
+				bq.y1 = 0.0;
+				bq.y2 = 0.0;
 			}
 		}
 		for bq in &mut self.bass_filters {
-			bq.x1 = 0.0; bq.x2 = 0.0; bq.y1 = 0.0; bq.y2 = 0.0;
+			bq.x1 = 0.0;
+			bq.x2 = 0.0;
+			bq.y1 = 0.0;
+			bq.y2 = 0.0;
 		}
 		for bq in &mut self.treble_filters {
-			bq.x1 = 0.0; bq.x2 = 0.0; bq.y1 = 0.0; bq.y2 = 0.0;
+			bq.x1 = 0.0;
+			bq.x2 = 0.0;
+			bq.y1 = 0.0;
+			bq.y2 = 0.0;
 		}
-	}
-
-	fn needs_rebuild(&self, s: &EqSettings) -> bool {
-		self.cached_rate != self.sample_rate
-			|| self.cached_parametric != s.parametric
-			|| self.cached_bass != s.bass_boost_db
-			|| self.cached_treble != s.treble_boost_db
-			|| self.cached_gains.len() != s.gains.len()
-			|| self.cached_qs.len() != s.qs.len()
-			|| self.cached_band_hz.len() != s.band_hz.len()
-			|| self.cached_gains.iter().zip(s.gains.iter()).any(|(a, b)| (a - b).abs() > 1e-6)
-			|| self.cached_qs.iter().zip(s.qs.iter()).any(|(a, b)| (a - b).abs() > 1e-6)
-			|| self.cached_band_hz.iter().zip(s.band_hz.iter()).any(|(a, b)| (a - b).abs() > 0.5)
+		self.limiter.reset();
 	}
 
 	fn ensure_filters(&mut self, s: &EqSettings) {
-		if !self.needs_rebuild(s) && !self.band_filters.is_empty() {
-			return;
-		}
-		let band_count = s.gains.len();
+		let band_count = s.gains.len().max(1);
+		let structural = self.cached_rate != self.sample_rate
+			|| self.band_filters.len() != self.channels
+			|| self.band_filters.first().map_or(true, |f| f.len() != band_count)
+			|| self.bass_filters.len() != self.channels
+			|| self.treble_filters.len() != self.channels;
 
-		if !self.band_filters.is_empty()
-			&& self.band_filters[0].len() == band_count
-			&& self.cached_parametric == s.parametric
-		{
-			for ch_filters in &mut self.band_filters {
-				for (i, bq) in ch_filters.iter_mut().enumerate() {
-					let q = if s.parametric {
-						s.qs.get(i).copied().unwrap_or(DEFAULT_Q)
-					} else {
-						DEFAULT_Q
-					};
-					let is_first = i == 0 && band_count > 1;
-					let is_last = i == band_count - 1 && band_count > 1;
-					let hz = s.band_hz.get(i).copied().unwrap_or(1000.0);
-					let gain = s.gains.get(i).copied().unwrap_or(0.0);
-					bq.c = design_band(hz, gain, q, is_first, is_last, self.sample_rate);
-				}
-			}
-			for (ch, bq) in self.bass_filters.iter_mut().enumerate() {
-				let _ = ch;
-				bq.c = design_shelf(100.0, s.bass_boost_db, self.sample_rate, false);
-			}
-			for (ch, bq) in self.treble_filters.iter_mut().enumerate() {
-				let _ = ch;
-				bq.c = design_shelf(8000.0, s.treble_boost_db, self.sample_rate, true);
-			}
-		} else {
+		let step = 1.0 - (-1.0 / (SMOOTH_TC * self.sample_rate.max(1) as f64)).exp();
+
+		if structural {
 			self.band_filters = (0..self.channels)
 				.map(|_| {
 					(0..band_count)
 						.map(|i| {
-							let q = if s.parametric {
-								s.qs.get(i).copied().unwrap_or(DEFAULT_Q)
-							} else {
-								DEFAULT_Q
-							};
-							let is_first = i == 0 && band_count > 1;
-							let is_last = i == band_count - 1 && band_count > 1;
-							let hz = s.band_hz.get(i).copied().unwrap_or(1000.0);
-							let gain = s.gains.get(i).copied().unwrap_or(0.0);
-							Biquad::new(design_band(hz, gain, q, is_first, is_last, self.sample_rate))
+							Biquad::new(
+								design_band(
+									s.band_hz.get(i).copied().unwrap_or(1000.0),
+									s.gains.get(i).copied().unwrap_or(0.0),
+									band_q(s.parametric, s.qs.get(i).copied()),
+									i == 0 && band_count > 1,
+									i == band_count - 1 && band_count > 1,
+									self.sample_rate,
+								),
+								step,
+							)
 						})
 						.collect()
 				})
 				.collect();
 
 			self.bass_filters = (0..self.channels)
-				.map(|_| Biquad::new(design_shelf(100.0, s.bass_boost_db, self.sample_rate, false)))
+				.map(|_| Biquad::new(design_shelf(100.0, s.bass_boost_db, self.sample_rate, false), step))
 				.collect();
 			self.treble_filters = (0..self.channels)
-				.map(|_| Biquad::new(design_shelf(8000.0, s.treble_boost_db, self.sample_rate, true)))
+				.map(|_| Biquad::new(design_shelf(8000.0, s.treble_boost_db, self.sample_rate, true), step))
 				.collect();
+		} else {
+			// In-place retarget: filter memory is preserved so changing gains/
+			// Qs/frequencies/shelves glides instead of popping or rebuilding.
+			for ch_filters in &mut self.band_filters {
+				for (i, bq) in ch_filters.iter_mut().enumerate() {
+					bq.set_target(design_band(
+						s.band_hz.get(i).copied().unwrap_or(1000.0),
+						s.gains.get(i).copied().unwrap_or(0.0),
+						band_q(s.parametric, s.qs.get(i).copied()),
+						i == 0 && band_count > 1,
+						i == band_count - 1 && band_count > 1,
+						self.sample_rate,
+					));
+				}
+			}
+			for bq in &mut self.bass_filters {
+				bq.set_target(design_shelf(100.0, s.bass_boost_db, self.sample_rate, false));
+			}
+			for bq in &mut self.treble_filters {
+				bq.set_target(design_shelf(8000.0, s.treble_boost_db, self.sample_rate, true));
+			}
 		}
 
 		self.cached_rate = self.sample_rate;
+		self.cached_parametric = s.parametric;
 		self.cached_gains = s.gains.clone();
 		self.cached_qs = s.qs.clone();
 		self.cached_band_hz = s.band_hz.clone();
-		self.cached_parametric = s.parametric;
 		self.cached_bass = s.bass_boost_db;
 		self.cached_treble = s.treble_boost_db;
 	}
@@ -316,25 +398,41 @@ impl EqProcessor {
 
 		self.ensure_filters(&snapshot);
 
-		for frame in samples.chunks_exact_mut(self.channels.max(1)) {
-			for (c, s) in frame.iter_mut().enumerate() {
+		let ch = self.channels.max(1);
+		for frame in samples.chunks_exact_mut(ch) {
+			let mut buf: [f64; 2] = [0.0; 2];
+			for (c, s) in frame.iter().enumerate() {
 				let mut v = *s as f64;
-				// Bass shelf
 				if let Some(bq) = self.bass_filters.get_mut(c) {
 					v = bq.process(v);
 				}
-				// EQ bands
 				if let Some(bands) = self.band_filters.get_mut(c) {
 					for bq in bands {
 						v = bq.process(v);
 					}
 				}
-				// Treble shelf
 				if let Some(bq) = self.treble_filters.get_mut(c) {
 					v = bq.process(v);
 				}
+				if c < buf.len() {
+					buf[c] = v;
+				}
+			}
+			// Soft-limit the frame (stereo-linked) before writing back.
+			let lim = frame.len().min(buf.len());
+			self.limiter.process_frame(&mut buf[..lim]);
+			for (c, s) in frame.iter_mut().enumerate() {
+				let v = if c < buf.len() { buf[c] } else { *s as f64 };
 				*s = v.clamp(-1.0, 1.0) as f32;
 			}
 		}
+	}
+}
+
+fn band_q(parametric: bool, q: Option<f32>) -> f32 {
+	if parametric {
+		q.unwrap_or(DEFAULT_Q)
+	} else {
+		DEFAULT_Q
 	}
 }

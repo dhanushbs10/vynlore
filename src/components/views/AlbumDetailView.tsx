@@ -105,7 +105,7 @@ export function AlbumDetailView({ albumName, tracks, playTrack, onBack }: AlbumD
             return (
               <div
                 key={track.id}
-                className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white/5 transition-colors ${active ? "bg-white/5" : ""}`}
+                className={`grid grid-cols-[48px_40px_1fr_70px] items-center gap-2.5 px-3 py-2 rounded-md cursor-pointer hover:bg-white-5 transition-colors ${active ? "bg-white-5" : ""}`}
                 onClick={() => {
                   playTrack(track, albumTracks);
                 }}

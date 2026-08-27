@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "Vynlore",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "identifier": "com.vynlore.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -27,7 +27,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": ["$APPDATA/**/*", "$APPLOCALDATA/**/*", "$DOWNLOAD/**/*", "$MUSIC/**/*", "$HOME/Music/**/*", "$HOME/**/*"]
+          "allow": ["$APPDATA/**/*", "$APPLOCALDATA/**/*", "$DOWNLOAD/**/*", "$MUSIC/**/*", "$HOME/Music/**/*"]
         }
       }
     }
@@ -62,7 +62,7 @@
         "description": "Vynlore - Lossless Audio Player"
       },
       {
-        "ext": ["aiff", "aif"],
+        "ext": ["aiff", "aif", "aifc"],
         "mimeType": "audio/aiff",
         "name": "AIFF Audio",
         "description": "Vynlore - Lossless Audio Player"
@@ -80,33 +80,9 @@
         "description": "Vynlore - Lossless Audio Player"
       },
       {
-        "ext": ["ogg", "oga", "opus"],
+        "ext": ["ogg", "oga"],
         "mimeType": "audio/ogg",
         "name": "OGG Audio",
-        "description": "Vynlore - Lossless Audio Player"
-      },
-      {
-        "ext": ["wma"],
-        "mimeType": "audio/x-ms-wma",
-        "name": "WMA Audio",
-        "description": "Vynlore - Lossless Audio Player"
-      },
-      {
-        "ext": ["ape"],
-        "mimeType": "audio/ape",
-        "name": "APE Audio",
-        "description": "Vynlore - Lossless Audio Player"
-      },
-      {
-        "ext": ["wv"],
-        "mimeType": "audio/wavpack",
-        "name": "WavPack Audio",
-        "description": "Vynlore - Lossless Audio Player"
-      },
-      {
-        "ext": ["dsf", "dff"],
-        "mimeType": "audio/dsd",
-        "name": "DSD Audio",
         "description": "Vynlore - Lossless Audio Player"
       }
     ]
