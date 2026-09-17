@@ -91,7 +91,7 @@ Position tracking is frame-exact across seams: position = (`frames_played` − `
 
 - Loop: check stop/pause/seek control flags each packet.
 - Decode one frame → interleaved `Vec<f32>` (Symphonia's `SampleBuffer<f32>` already normalizes to −1..1 for any bit depth — no manual rescaling). The decoder layer (`decoder/audio.rs`) is container-agnostic: `open_audio`/`decode_packet`/`seek` work identically for lossless and lossy inputs, which also means gapless chaining works across formats when channel counts match (e.g. FLAC → WAV).
-- If file rate ≠ output rate, feed **rubato** `SincFixedIn<f32>` (sinc_len 256, Blackman-Harris² window, cubic interpolation, 1024-frame input chunks). Resampling happens here, off the RT thread. At EOF, `process_partial(None)` flushes the resampler tail so the last samples aren't dropped.
+- If file rate ≠ output rate, feed **rubato** `SincFixedIn<f32>` (Blackman-Harris² window, cubic interpolation, 1024-frame input chunks) with the sinc window scaled to the conversion depth (256 taps near 1:1, 128 mid-range, 64 for deep downsamples like 176.4k→48k — a fixed 256-tap filter can't keep realtime there). Resampling happens here, off the RT thread. At EOF, the tail is flushed in full chunks plus one zero-padded drain call so the last samples aren't dropped (and the drain can't loop forever).
 - **Equalizer (`audio/eq.rs`)**: after resampling, before the queue push (both in `pump()` and the EOF tail flush), a multi-band graphic EQ (5–32 bands, RBJ-cookbook biquads — low-shelf → peaking ×N → high-shelf, adjustable Q, Direct Form I, ±12 dB) is applied on this same decoder thread — never the RT thread. `SharedEq` (`Arc<Mutex<EqSettings>>`) lives on `AppState`, so `update_eq` mutates settings live; each `Pipeline`'s `EqProcessor` caches coefficients keyed by (output rate, gains snapshot) and clears filter state when disabled/neutral or on seek.
 - Push into the `SampleQueue`; when drained at EOF, emit `playback-ended` exactly once (guarded by an atomic flag).
 - Seek path: set `seek_to` on the control block → decoder performs an accurate Symphonia seek, calls `resampler.reset()`, clears the queue.
@@ -135,7 +135,7 @@ Thin cpal wrapper: `start(config, device, callback)` and `select_device_by_numbe
 | `get_playlist_name(playlistId)` | Playlist title |
 | `get_waveform(filePath)` | Cached per-file RMS peak data for the waveform seekbar |
 | `read_text_file(path)` | Reads a text file (lyrics) safely — only under allowed roots |
-| `add_external_track(filePath)` | Registers a file opened via the `open-file` association as a real library track |
+| `add_external_track(filePath)` | Registers an externally opened file as a library row (currently unused by the frontend — file-association playback plays the raw path without registering) |
 | `increment_play_count(filePath)` | Bumps play_count/last_played (called on every track start, incl. gapless chains) |
 | `get_recently_played(limit?)` | Tracks ordered by last_played desc |
 
@@ -190,7 +190,7 @@ Key behaviors:
 - **Position:** polls `get_position` every 250 ms while playing (backend counts frames on the RT thread). Outside Tauri (pure browser dev), a simulated timer stands in.
 - **Track end:** listens for `playback-ended`; repeat-one replays, otherwise advances through the queue (wrapping on repeat-all, stopping at the end). Mid-queue transitions are gapless via the backend chain; the UI follows `track-changed` events.
 - **Gapless sync:** an effect mirrors the visible queue + repeat mode into `queue_next_track` (clearing it for repeat-one or channel-mismatched neighbors).
-- **Volume:** persisted to localStorage (`vynlore.volume`, default 0.8) and mirrored into the backend atomic on change/startup.
+- **Volume:** persisted to localStorage (`vynlore.volume`, default 1.0) and mirrored into the backend atomic on change/startup.
 - **Equalizer:** `eqEnabled` / `eqGains[10]` / `eqAuto` persisted to `vynlore.eq`; every change invokes `update_eq` (and once at startup). **Auto-match genre:** when a track with a recognized genre starts (or auto is toggled on mid-track), the mapped preset from `audio/eqPresets.ts` applies automatically; manual band edits or preset clicks take over until the next genre change. UI lives in the `EqPanel` drawer (sidebar button), vertical range sliders + preset chips + power/reset.
 - **Seek:** optimistic local time update + `seek_playback(seekSecs)`.
 - **Shuffle:** Fisher-Yates preserving the current track at index 0; pre-shuffle order kept in a ref so toggling off restores the original queue. Shared util in `utils/shuffle.ts`.
@@ -226,7 +226,7 @@ All views render real DB data with deterministic ordering (artist→album→trac
 
 Development: `npm run dev` (Vite on :1420) + `npm run tauri dev`. Production: `npm run build` (tsc + vite) then `npm run tauri build`.
 
-Release profile: `opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "abort"`.
+Release profile: `opt-level = 3`, `lto = true`, `codegen-units = 1`. Dev profile: `opt-level = 2` (debug builds must keep realtime for the DSP/resampler paths).
 
 ---
 
@@ -258,7 +258,7 @@ Release profile: `opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "a
 
 - Opus decode (Symphonia 0.5 demuxes .opus but has no codec; excluded from scanning)
 - Gapless is same-channel-count only (mismatched layouts take the clean restart path)
-- Exclusive mode is format-gated per device (e.g. a 48 kHz-only endpoint refuses 44.1 kHz files → silent shared fallback); no automatic rate-matching retry
-- No replay-gain / loudness normalization yet (the multi-band EQ shipped; auto-genre preset matching included)
+- Exclusive mode is format-gated per device (e.g. a 48 kHz-only endpoint refuses 44.1 kHz files → shared fallback); no automatic rate-matching retry
+- Integrated loudness normalization (EBU R128 flavour) with per-track/per-album modes; files added by the watcher are analyzed inline, changed files re-analyzed on rescan
 - No play-count analytics beyond Recently Played (no top-charts/stats view)
 - Single-window UI; no mini-player

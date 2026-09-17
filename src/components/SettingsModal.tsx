@@ -11,6 +11,7 @@ import {
   Timer,
   XCircle,
   Cloud,
+  MonitorCog,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useThemes, builtinId, customId } from "../context/ThemeContext";
@@ -43,7 +44,7 @@ export function SettingsModal({
   const panelRef = useRef<HTMLDivElement>(null);
   const { builtins, custom, currentId, setTheme, importTheme, exportTheme, deleteTheme } =
     useThemes();
-  const { sleepTimerSeconds, sleepRemainingMs, setSleepTimer, cancelSleepTimer, replaygainMode, setReplaygainMode, scrobbleEnabled, scrobbleToken, setScrobbleEnabled, setScrobbleToken } =
+  const { sleepTimerSeconds, sleepRemainingMs, setSleepTimer, cancelSleepTimer, replaygainMode, setReplaygainMode, scrobbleEnabled, scrobbleToken, setScrobbleEnabled, setScrobbleToken, closeToTray, setCloseToTray, notifyTrack, setNotifyTrack, autostart, setAutostart, smtcEnabled, setSmtcEnabled, crossfadeSeconds, setCrossfadeSeconds } =
     usePlayer();
 
   useEffect(() => {
@@ -222,6 +223,26 @@ export function SettingsModal({
                   Levels every song to a consistent loudness (EBU R128). Computed automatically when
                   your library is scanned; songs without analysis play unchanged.
                 </div>
+
+                <div className="mt-5 mb-1.5 text-[13px] font-semibold text-text">Crossfade</div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0"
+                    max="8"
+                    step="0.5"
+                    value={crossfadeSeconds}
+                    onChange={(e) => setCrossfadeSeconds(Number(e.target.value))}
+                    className="flex-1"
+                  />
+                  <span className="text-[11px] text-text-secondary tabular-nums w-[58px] text-right">
+                    {crossfadeSeconds > 0 ? `${crossfadeSeconds.toFixed(1)}s` : "Off"}
+                  </span>
+                </div>
+                <div className="text-[11px] text-text-muted mt-1.5">
+                  Fades the end of each track into the next (0–8s). Works with automatic gapless
+                  transitions; disabled by default.
+                </div>
               </div>
 
               <div className="mt-6">
@@ -254,7 +275,92 @@ export function SettingsModal({
                 />
                 <div className="text-[11px] text-text-muted mt-1.5">
                   Finishes (75% or 4+ minutes) are reported to listenbrainz.org. Grab a token from
-                  your account's settings — no API key or signup wall.
+                  your ListenBrainz account settings page.
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <MonitorCog size={15} className="text-text-muted" />
+                  <span className="text-[11px] font-semibold tracking-[0.14em] uppercase text-text-muted">
+                    System
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <div className="text-[13px] font-semibold text-text">Minimize to tray</div>
+                    <div className="text-[11px] text-text-muted">
+                      Closing the window keeps playback running in the background
+                    </div>
+                  </div>
+                  <button
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12px] font-medium cursor-pointer transition-colors ${
+                      closeToTray
+                        ? "border-[var(--color-accent)] text-text"
+                        : "border-border text-text-secondary hover:text-text hover:bg-bg-hover"
+                    }`}
+                    onClick={() => setCloseToTray(!closeToTray)}
+                  >
+                    {closeToTray ? "On" : "Off"}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <div className="text-[13px] font-semibold text-text">Launch on startup</div>
+                    <div className="text-[11px] text-text-muted">
+                      Starts Vynlore automatically when you sign in to Windows
+                    </div>
+                  </div>
+                  <button
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12px] font-medium cursor-pointer transition-colors ${
+                      autostart
+                        ? "border-[var(--color-accent)] text-text"
+                        : "border-border text-text-secondary hover:text-text hover:bg-bg-hover"
+                    }`}
+                    onClick={() => setAutostart(!autostart)}
+                  >
+                    {autostart ? "On" : "Off"}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <div className="text-[13px] font-semibold text-text">Track-change notifications</div>
+                    <div className="text-[11px] text-text-muted">
+                      Show a "Now playing" toast when a track changes while the window is not focused
+                    </div>
+                  </div>
+                  <button
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12px] font-medium cursor-pointer transition-colors ${
+                      notifyTrack
+                        ? "border-[var(--color-accent)] text-text"
+                        : "border-border text-text-secondary hover:text-text hover:bg-bg-hover"
+                    }`}
+                    onClick={() => setNotifyTrack(!notifyTrack)}
+                  >
+                    {notifyTrack ? "On" : "Off"}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[13px] font-semibold text-text">Media keys &amp; taskbar controls</div>
+                    <div className="text-[11px] text-text-muted">
+                      Windows system media controls (just next to the volume slider)
+                    </div>
+                  </div>
+                  <button
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[12px] font-medium cursor-pointer transition-colors ${
+                      smtcEnabled
+                        ? "border-[var(--color-accent)] text-text"
+                        : "border-border text-text-secondary hover:text-text hover:bg-bg-hover"
+                    }`}
+                    onClick={() => setSmtcEnabled(!smtcEnabled)}
+                  >
+                    {smtcEnabled ? "On" : "Off"}
+                  </button>
                 </div>
               </div>
 

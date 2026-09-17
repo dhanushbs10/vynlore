@@ -2,14 +2,14 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { usePlayer } from "../context/PlayerContext";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { motion } from "framer-motion";
-import { Shuffle, SkipBack, SkipForward, Repeat, Repeat1 } from "lucide-react";
+import { Shuffle, SkipBack, SkipForward, Repeat, Repeat1, Volume2 } from "lucide-react";
 
 const MAX_POINTS = 80;
 const BAR_GAP = 1;
 
 export function WaveformSeekbar() {
   const {
-    currentTime, currentTrack, isPlaying, isPaused, seekTime,
+    currentTime, currentTrack, isPlaying, isPaused, seekTime, volume, setVolume,
     togglePlayPause, toggleShuffle, toggleRepeat, playNext, playPrev,
     isShuffle, repeatMode,
   } = usePlayer();
@@ -32,26 +32,6 @@ export function WaveformSeekbar() {
       });
     return () => { disposed = true; };
   }, [currentTrack?.id, currentTrack?.file_path]);
-
-  useEffect(() => {
-    if (!isTauri()) return;
-    let disposed = false;
-    let cleanup: (() => void) | undefined;
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      if (disposed) return;
-      const unlisten = listen<{ file_path: string }>("waveform-ready", (event) => {
-        const path = event.payload.file_path;
-        if (currentTrack?.file_path !== path) return;
-        invoke<number[]>("get_waveform", { filePath: path })
-          .then((peaks) => {
-            if (!disposed && peaks && peaks.length > 0) setRawPeaks(peaks);
-          })
-          .catch(() => {});
-      });
-      cleanup = () => { unlisten.then((fn) => fn()); };
-    });
-    return () => { disposed = true; cleanup?.(); };
-  }, [currentTrack?.file_path]);
 
   const bars = useMemo(() => {
     if (rawPeaks.length === 0) return [];
@@ -156,8 +136,21 @@ export function WaveformSeekbar() {
         <span style={{ marginLeft: "auto" }}>-{formatTime(Math.max(0, duration - elapsed))}</span>
       </div>
 
-      {/* Transport controls */}
-      <div className="flex items-center justify-center gap-4 z-[10]">
+      {/* Transport controls — centered under the seekbar; volume hangs left */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center z-[10] w-full gap-4">
+        <div className="flex items-center gap-1.5 justify-start">
+          <Volume2 size={14} className="text-white-40" />
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={Math.round(volume * 100)}
+            onChange={(e) => setVolume(Number(e.target.value) / 100)}
+            className="w-16 volume-slider"
+            aria-label="Volume"
+          />
+        </div>
+        <div className="flex items-center gap-4">
         <button
           onClick={toggleShuffle}
           className={`transition-colors ${isShuffle ? "text-white" : "text-white-40 hover:text-white"}`}
@@ -205,6 +198,8 @@ export function WaveformSeekbar() {
             <span className="absolute -top-1 -right-1 text-[8px] font-bold text-white leading-none">1</span>
           )}
         </button>
+        </div>
+        <div />
       </div>
     </div>
   );

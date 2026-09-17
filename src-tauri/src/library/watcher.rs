@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::Emitter;
 
-use crate::library::db::LibraryDb;
+use crate::library::db::{LibraryDb, StashedTrackState};
 use crate::library::metadata;
 
 const DEBOUNCE: Duration = Duration::from_millis(800);
@@ -18,6 +18,11 @@ pub struct WatcherEvent {
     pub count: usize,
     #[serde(default)]
     pub total: Option<usize>,
+    /// "scan" for scanner lifecycle/progress, "library" for watcher file
+    /// add/remove batches. The frontend routes on this instead of sniffing
+    /// titles (a track literally named "Scanner" used to hijack scan UI).
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 fn watcher_slot() -> &'static Mutex<Option<(RecommendedWatcher, Arc<std::sync::atomic::AtomicBool>)>> {
@@ -88,6 +93,11 @@ pub fn start_watcher(
 	drop(slot);
 
 	let app_for_worker = app;
+	// Recently deleted rows, kept briefly so a file that vanishes and comes
+	// straight back (tag editor atomic save, temp-file replace) regains its
+	// likes, play counts, loudness analysis and waveform instead of starting
+	// over as a brand-new row.
+	let mut stash: HashMap<PathBuf, (Instant, StashedTrackState)> = HashMap::new();
 	std::thread::Builder::new()
 		.name("vynlore-watch".into())
 		.spawn(move || {
@@ -96,6 +106,7 @@ pub fn start_watcher(
 					break;
 				}
 				std::thread::sleep(POLL_INTERVAL);
+				stash.retain(|_, (seen, _)| seen.elapsed() < Duration::from_secs(120));
 
 				let due: Vec<PathBuf> = {
 					let mut map = pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -133,7 +144,11 @@ pub fn start_watcher(
 				let mut removed_count = 0usize;
 				if let Ok(db) = db.lock() {
 					for path in due_removed {
-						match db.remove_track_by_path(&path.to_string_lossy()) {
+						let key = path.to_string_lossy().to_string();
+						if let Some(state) = db.stash_track_state(&key) {
+							stash.insert(path.clone(), (Instant::now(), state));
+						}
+						match db.remove_track_by_path(&key) {
 							Ok(n) => removed_count += n,
 							Err(e) => eprintln!("DB remove failed for {:?}: {}", path, e),
 						}
@@ -145,44 +160,81 @@ pub fn start_watcher(
 									meta.genre =
 										metadata::infer_genre_from_path(&path, &root).to_string();
 								}
+								// New files get the same loudness analysis as scanned
+								// ones so ReplayGain stays consistent within a session
+								// (the scanner skips re-analysis only when a gain is
+								// already stored).
+								let key = path.to_string_lossy().to_string();
+								let existing_gain = db.get_replaygain(&key).unwrap_or((None, None, None));
+								let (gain, peak) = match existing_gain.0 {
+									Some(g) => (Some(g), existing_gain.2),
+									None => match crate::audio::replaygain::analyze(&path) {
+										Ok(res) => (Some(res.track_gain_db), Some(res.track_peak)),
+										Err(e) => {
+											eprintln!("Warning: loudness analysis failed for {:?}: {}", path, e);
+											(None, None)
+										}
+									},
+								};
 								let folder_str = root.to_string_lossy().to_string();
-								if let Err(e) = db.upsert_track(
-									&path.to_string_lossy(),
-									&meta.title,
-									&meta.artist,
-									&meta.album,
-									&meta.genre,
-									meta.sample_rate,
-									meta.bit_depth,
-									meta.channels,
-									meta.duration_secs,
-								meta.track_number,
-								meta.disc_number,
-								&folder_str,
-								&meta.cover_path,
-								&meta.lyrics,
-								&meta.format,
-							) {
+								let (mtime, size) = metadata::file_signature(&path);
+								if let Err(e) = db.conn.execute(
+									crate::library::db::UPSERT_TRACK_SQL,
+									rusqlite::params![
+										key,
+										meta.title,
+										meta.artist,
+										meta.album,
+										meta.genre,
+										meta.sample_rate,
+										meta.bit_depth,
+										meta.channels,
+										meta.duration_secs,
+										meta.track_number,
+										meta.disc_number,
+										folder_str,
+										meta.cover_path,
+										meta.lyrics,
+										meta.format,
+										gain,
+										peak,
+										meta.bitrate as i64,
+										mtime,
+										size,
+									],
+								) {
 									eprintln!("DB update failed for {:?}: {}", path, e);
 								} else {
 									added.push((meta.title, meta.artist));
+									// File came back after a brief delete (editor
+									// save): restore likes/counts/analysis/waveform.
+									if let Some((seen, state)) = stash.remove(&path) {
+										if seen.elapsed() < Duration::from_secs(120) {
+											let _ = db.restore_track_state(&key, &state);
+										}
+									}
 								}
 							}
-							Err(_) => {}
+							Err(e) => eprintln!("Warning: failed to read added file {:?}: {}", path, e),
 						}
 					}
 				}
 
 				if !added.is_empty() {
+					// A newcomer can shift its album's mean gain — refresh.
+					if let Ok(dbg) = db.lock() {
+						let _ = dbg.recompute_album_gains();
+					}
 					let count = added.len();
 					let titles: Vec<String> = added.into_iter().map(|(t, _)| t).collect();
 					let _ = app_for_worker.emit(
 						"watcher-event",
-WatcherEvent {
+					WatcherEvent {
                             title: titles.join(", "),
                             artist: root.to_string_lossy().to_string(),
                             count,
                             total: None,
+                            kind: Some("library".to_string()),
                         },
 					);
 				}
@@ -191,11 +243,12 @@ WatcherEvent {
 					// Frontend treats "removed" specially: refresh, no toast.
 					let _ = app_for_worker.emit(
 						"watcher-event",
-WatcherEvent {
+					WatcherEvent {
                             title: "removed".to_string(),
                             artist: root.to_string_lossy().to_string(),
                             count: removed_count,
                             total: None,
+                            kind: Some("library".to_string()),
                         },
 					);
 				}

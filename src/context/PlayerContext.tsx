@@ -15,7 +15,7 @@ import {
   defaultQs,
   presetForGenre,
 } from "../audio/eqPresets";
-import { scrobbleListenBrainz } from "../audio/scrobble";
+import { useScrobbling } from "../hooks/useScrobbling";
 
 const EQ_PRESET_KEYS = new Set(EQ_PRESETS.map((p) => p.key));
 
@@ -44,8 +44,14 @@ interface PlayerContextType {
     eqBassBoostDb: number;
     eqTrebleBoostDb: number;
     seekTime: (time: number) => void;
-    setSelectedDevice: (deviceIndex: number) => void;
+    setSelectedDevice: (deviceIndex: number | null) => void;
     setVolume: (volume: number) => void;
+    playbackRate: number;
+    pitchSemitones: number;
+    setPlaybackRate: (rate: number) => void;
+    setPitchSemitones: (semitones: number) => void;
+    crossfadeSeconds: number;
+    setCrossfadeSeconds: (seconds: number) => void;
     toggleExclusive: () => void;
     toggleEq: () => void;
     toggleEqAuto: () => void;
@@ -75,9 +81,18 @@ interface PlayerContextType {
     scrobbleToken: string;
     setScrobbleEnabled: (enabled: boolean) => void;
     setScrobbleToken: (token: string) => void;
+    closeToTray: boolean;
+    setCloseToTray: (enabled: boolean) => void;
+    notifyTrack: boolean;
+    setNotifyTrack: (enabled: boolean) => void;
+    autostart: boolean;
+    setAutostart: (enabled: boolean) => void;
+    smtcEnabled: boolean;
+    setSmtcEnabled: (enabled: boolean) => void;
     setLibraryTracks: (tracks: Track[]) => void;
     setDisplayedTracks: (tracks: Track[]) => void;
     setQueueToLibrary: () => void;
+    patchTrack: (filePath: string, patch: Partial<Track>) => void;
     reorderQueue: (from: number, to: number) => void;
 }
 
@@ -91,8 +106,42 @@ const BALANCE_KEY = "vynlore.balance";
 const PREAMP_KEY = "vynlore.preamp";
 const SLEEP_TIMER_KEY = "vynlore.sleepTimer";
 const REPLAYGAIN_KEY = "vynlore.replaygain";
-const SCROBBLE_ENABLED_KEY = "vynlore.scrobble.enabled";
-const SCROBBLE_TOKEN_KEY = "vynlore.scrobble.token";
+const PLAYBACK_RATE_KEY = "vynlore.playbackRate";
+const PITCH_KEY = "vynlore.pitch";
+const CROSSFADE_KEY = "vynlore.crossfade";
+
+function loadStoredCrossfade(): number {
+    try {
+        const raw = window.localStorage.getItem(CROSSFADE_KEY);
+        const parsed = raw === null ? NaN : Number(raw);
+        if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 12) return parsed;
+    } catch {
+        // ignore
+    }
+    return 0;
+}
+
+function loadStoredPlaybackRate(): number {
+    try {
+        const raw = window.localStorage.getItem(PLAYBACK_RATE_KEY);
+        const parsed = raw === null ? NaN : Number(raw);
+        if (Number.isFinite(parsed) && parsed >= 0.25 && parsed <= 4) return parsed;
+    } catch {
+        // ignore
+    }
+    return 1.0;
+}
+
+function loadStoredPitch(): number {
+    try {
+        const raw = window.localStorage.getItem(PITCH_KEY);
+        const parsed = raw === null ? NaN : Number(raw);
+        if (Number.isFinite(parsed) && parsed >= -12 && parsed <= 12) return parsed;
+    } catch {
+        // ignore
+    }
+    return 0;
+}
 
 function loadStoredReplaygainMode(): number {
     try {
@@ -102,14 +151,6 @@ function loadStoredReplaygainMode(): number {
         // ignore
     }
     return 1;
-}
-
-function loadStoredFlag(key: string): boolean {
-    try {
-        return window.localStorage.getItem(key) === "1";
-    } catch {
-        return false;
-    }
 }
 
 interface EqPersisted {
@@ -235,6 +276,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
     const [currentTime, setCurrentTime] = useState(0);
     const [volume, _setVolume] = useState<number>(() => loadStoredVolume());
+    const [playbackRate, _setPlaybackRate] = useState<number>(() => loadStoredPlaybackRate());
+    const [pitchSemitones, _setPitchSemitones] = useState<number>(() => loadStoredPitch());
+    const [crossfadeSeconds, _setCrossfadeSeconds] = useState<number>(() => loadStoredCrossfade());
     const [exclusiveEnabled, setExclusiveEnabled] = useState<boolean>(() => loadStoredExclusive());
     const [exclusiveActive, setExclusiveActive] = useState(false);
     const storedEq = React.useMemo(() => loadStoredEq(), []);
@@ -274,16 +318,16 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return null;
     });
     const [replaygainMode, setReplaygainModeState] = useState<number>(() => loadStoredReplaygainMode());
-    const [scrobbleEnabled, setScrobbleEnabledState] = useState<boolean>(() => loadStoredFlag(SCROBBLE_ENABLED_KEY));
-    const [scrobbleToken, setScrobbleTokenState] = useState<string>(() => {
-        try {
-            return window.localStorage.getItem(SCROBBLE_TOKEN_KEY) ?? "";
-        } catch {
-            return "";
-        }
-    });
+
+    const [closeToTray, setCloseToTrayState] = useState(true);
+    const [notifyTrack, setNotifyTrackState] = useState(true);
+    const [autostart, setAutostartState] = useState(false);
+    const [smtcEnabled, setSmtcEnabledState] = useState(true);
 
     const volumeRef = useRef(volume);
+    const playbackRateRef = useRef(playbackRate);
+    const pitchRef = useRef(pitchSemitones);
+    const crossfadeRef = useRef(crossfadeSeconds);
     const selectedDeviceRef = useRef(selectedDevice);
     const exclusiveRef = useRef(exclusiveEnabled);
     const eqEnabledRef = useRef(eqEnabled);
@@ -309,9 +353,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const lastQueuedNextRef = useRef<string | null>(null);
     const sleepDeadlineRef = useRef<number | null>(null);
     const replaygainModeRef = useRef(replaygainMode);
-    const scrobbleEnabledRef = useRef(scrobbleEnabled);
-    const scrobbleTokenRef = useRef(scrobbleToken);
-    const lastScrobbledPathRef = useRef<string | null>(null);
     const currentTimeRef = useRef(0);
     const playInFlightRef = useRef(false);
     const lastRequestedTrackRef = useRef<string>("");
@@ -325,8 +366,13 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // starts.  The polling interval reads this to discard stale get_position
     // results that were dispatched before setCurrentTime(0) was committed.
     const playbackGenerationRef = useRef(0);
+    // Dedups the backend's double open-file emit (fast + slow boot cover).
+    const lastOpenFileRef = useRef<{ path: string; at: number }>({ path: "", at: 0 });
 
     volumeRef.current = volume;
+    playbackRateRef.current = playbackRate;
+    pitchRef.current = pitchSemitones;
+    crossfadeRef.current = crossfadeSeconds;
     selectedDeviceRef.current = selectedDevice;
     exclusiveRef.current = exclusiveEnabled;
     isPausedRef.current = isPaused;
@@ -343,9 +389,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     displayedTracksRef.current = displayedTracks;
     currentTrackRef.current = currentTrack;
     repeatModeRef.current = repeatMode;
-    scrobbleEnabledRef.current = scrobbleEnabled;
-    scrobbleTokenRef.current = scrobbleToken;
     currentTimeRef.current = currentTime;
+
+    const { scrobbleEnabled, scrobbleToken, setScrobbleEnabled, setScrobbleToken, maybeScrobble, markNowPlaying } = useScrobbling();
 
     // ── Sleep timer ────────────────────────────────────────────────────────
     const setSleepTimer = useCallback((minutes: number) => {
@@ -423,6 +469,36 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         void invoke("set_replaygain_mode", { mode: replaygainModeRef.current }).catch(() => {});
     }, []);
 
+    useEffect(() => {
+        if (!isTauri()) return;
+        invoke<boolean>("get_close_to_tray").then(setCloseToTrayState).catch(() => {});
+        invoke<boolean>("get_notify_track").then(setNotifyTrackState).catch(() => {});
+        invoke<boolean>("get_autostart").then(setAutostartState).catch(() => {});
+    }, []);
+
+    const setCloseToTray = useCallback((enabled: boolean) => {
+        setCloseToTrayState(enabled);
+        if (isTauri()) invoke("set_close_to_tray", { enabled }).catch(() => {});
+    }, []);
+
+    const setNotifyTrack = useCallback((enabled: boolean) => {
+        setNotifyTrackState(enabled);
+        if (isTauri()) invoke("set_notify_track", { enabled }).catch(() => {});
+    }, []);
+
+    const setAutostart = useCallback((enabled: boolean) => {
+        if (!isTauri()) return;
+        setAutostartState(enabled);
+        invoke<boolean>("set_autostart", { enabled })
+            .then(setAutostartState)
+            .catch(() => setAutostartState(!enabled));
+    }, []);
+
+    const setSmtcEnabled = useCallback((enabled: boolean) => {
+        setSmtcEnabledState(enabled);
+        if (isTauri()) invoke("set_smtc_enabled", { enabled }).catch(() => {});
+    }, []);
+
     const setReplaygainMode = useCallback((mode: number) => {
         const m = mode < 0 ? 0 : mode > 2 ? 2 : mode;
         setReplaygainModeState(m);
@@ -433,38 +509,6 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // ignore
         }
         if (isTauri()) void invoke("set_replaygain_mode", { mode: m }).catch(() => {});
-    }, []);
-
-    const setScrobbleEnabled = useCallback((enabled: boolean) => {
-        setScrobbleEnabledState(enabled);
-        scrobbleEnabledRef.current = enabled;
-        try {
-            window.localStorage.setItem(SCROBBLE_ENABLED_KEY, enabled ? "1" : "0");
-        } catch {
-            // ignore
-        }
-    }, []);
-
-    const setScrobbleToken = useCallback((token: string) => {
-        setScrobbleTokenState(token);
-        scrobbleTokenRef.current = token;
-        try {
-            window.localStorage.setItem(SCROBBLE_TOKEN_KEY, token);
-        } catch {
-            // ignore
-        }
-    }, []);
-
-    // Scrobble a finished listen: a real play is 75% of the track or 4+
-    // minutes elapsed, and never twice for the same file in a row.
-    const maybeScrobble = useCallback((track: Track | null, playedSecs: number) => {
-        if (!track || !scrobbleEnabledRef.current || !scrobbleTokenRef.current.trim()) return;
-        const dur = track.duration_secs || 0;
-        const qualifying = dur > 30 && (playedSecs >= dur * 0.75 || (dur > 0 && playedSecs >= 240));
-        if (!qualifying) return;
-        if (lastScrobbledPathRef.current === track.file_path) return;
-        lastScrobbledPathRef.current = track.file_path;
-        void scrobbleListenBrainz(scrobbleTokenRef.current, track).catch(() => {});
     }, []);
 
     const handlePlaybackEnded = useCallback(async () => {
@@ -478,6 +522,34 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             await playNextInternal();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Push metadata/state into the Windows taskbar media controls (SMTC).
+    const updateSmtc = useCallback((track: Track | null, playing: boolean) => {
+        if (!isTauri()) return;
+        if (!track) {
+            invoke("set_smtc_enabled", { enabled: false }).catch(() => {});
+            return;
+        }
+        invoke("update_smtc_metadata", {
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            coverPath: track.cover_path,
+            durationSecs: track.duration_secs || 0,
+            playing,
+        }).catch(() => {});
+    }, []);
+
+    // Show a "Now playing" toast when the window is unfocused. The backend
+    // handles the focus/toggle gating so gapless boundaries don't spam.
+    const notifyNowPlaying = useCallback((track: Track | null) => {
+        if (!isTauri() || !track) return;
+        invoke("notify_now_playing", {
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+        }).catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -506,9 +578,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const idx = queue.findIndex((t) => t.file_path === event.payload.path);
             if (idx === -1) return;
             maybeScrobble(currentTrackRef.current, currentTimeRef.current);
+            markNowPlaying(queue[idx]);
             setCurrentTime(0);
             setCurrentTrackIndex(idx);
             setCurrentTrack(queue[idx]);
+            updateSmtc(queue[idx], true);
+            notifyNowPlaying(queue[idx]);
             invoke("increment_play_count", { filePath: event.payload.path }).catch(() => {});
         }).then((fn) => {
             if (disposed) fn();
@@ -533,40 +608,39 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             else unlistenMedia = fn;
         });
 
-        // File association: user opened an audio file via double-click / "Open with"
+        // File association: user opened an audio file via double-click / "Open
+        // with". This is a transient listen — the file must NOT be registered
+        // into the watched library (no DB row, no cover scan, no folder
+        // association). It plays from the raw path so the user's loaded folder
+        // stays exactly as it was. The backend emits twice (fast + slow boot
+        // cover); dedup by path so a slow start can't double-play.
         listen<string>("open-file", (event) => {
             if (disposed) return;
             const filePath = event.payload;
             if (!filePath) return;
-            void (async () => {
-                try {
-                    // Register the file as a real library row so likes and
-                    // playlists get a stable id instead of the pseudo id:-1.
-                    const track = await invoke<Track>("add_external_track", { filePath });
-                    void actionsRef.current.playTrack(track, [track]);
-                    return;
-                } catch (err) {
-                    console.error("Failed to register external track:", err);
-                }
-                const miniTrack: Track = {
-                    id: -1,
-                    title: filePath.split(/[/\\]/).pop() || "Unknown",
-                    artist: "",
-                    album: "",
-                    file_path: filePath,
-                    cover_path: null,
-                    duration_secs: 0,
-                    format: filePath.split(".").pop()?.toUpperCase() || "",
-                    sample_rate: 0,
-                    bit_depth: 0,
-                    channels: 2,
-                    track_number: 0,
-                    disc_number: 0,
-                    play_count: 0,
-                    genre: null,
-                };
-                void actionsRef.current.playTrack(miniTrack, [miniTrack]);
-            })();
+            const now = Date.now();
+            const last = lastOpenFileRef.current;
+            if (filePath === last.path && now - last.at < 5000) return;
+            lastOpenFileRef.current = { path: filePath, at: now };
+            const miniTrack: Track = {
+                id: -1,
+                title: filePath.split(/[/\\]/).pop() || "Unknown",
+                artist: "",
+                album: "",
+                file_path: filePath,
+                cover_path: null,
+                duration_secs: 0,
+                format: filePath.split(".").pop()?.toUpperCase() || "",
+                sample_rate: 0,
+                bit_depth: 0,
+                channels: 2,
+                track_number: 0,
+                disc_number: 0,
+                play_count: 0,
+                bitrate: 0,
+                genre: null,
+            };
+            void actionsRef.current.playTrack(miniTrack, [miniTrack]);
         }).then((fn) => {
             if (disposed) fn();
             else unlistenOpenFile = fn;
@@ -668,6 +742,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         _setDisplayedTracks(libraryTracks);
     }, [libraryTracks]);
 
+    // Apply an in-place tag edit (e.g. after writing tags to disk) across the
+    // current track, library, and queue without forcing a replay.
+    const patchTrack = useCallback((filePath: string, patch: Partial<Track>) => {
+        setCurrentTrack((prev) => (prev?.file_path === filePath ? { ...prev, ...patch } : prev));
+        _setLibraryTracks((prev) => prev.map((t) => (t.file_path === filePath ? { ...t, ...patch } : t)));
+        _setDisplayedTracks((prev) => prev.map((t) => (t.file_path === filePath ? { ...t, ...patch } : t)));
+    }, []);
+
     const reorderQueue = useCallback((from: number, to: number) => {
         const prev = displayedTracksRef.current;
         if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return;
@@ -680,16 +762,21 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setCurrentTrackIndex(currentId === undefined ? -1 : next.findIndex((t) => t.id === currentId));
     }, []);
 
-    const setSelectedDevice = useCallback((deviceIndex: number) => {
+    const setSelectedDevice = useCallback((deviceIndex: number | null) => {
         setSelectedDeviceState(deviceIndex);
         try {
-            window.localStorage.setItem(DEVICE_KEY, String(deviceIndex));
+            if (deviceIndex === null) {
+                window.localStorage.removeItem(DEVICE_KEY);
+            } else {
+                window.localStorage.setItem(DEVICE_KEY, String(deviceIndex));
+            }
         } catch {
             // ignore
         }
     }, []);
 
     const setVolume = useCallback((newVolume: number) => {
+        if (!Number.isFinite(newVolume)) return;
         const clamped = Math.min(1, Math.max(0, newVolume));
         _setVolume(clamped);
         try {
@@ -699,6 +786,49 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         if (isTauri()) {
             invoke("set_volume", { volume: clamped }).catch(() => {});
+        }
+    }, []);
+
+    const setPlaybackRate = useCallback((newRate: number) => {
+        if (!Number.isFinite(newRate)) return;
+        const clamped = Math.min(4, Math.max(0.25, newRate));
+        _setPlaybackRate(clamped);
+        try {
+            window.localStorage.setItem(PLAYBACK_RATE_KEY, String(clamped));
+        } catch {
+            // ignore
+        }
+        if (isTauri()) {
+            invoke("set_playback_rate", { rate: clamped }).catch(() => {});
+        }
+    }, []);
+
+    const setPitchSemitones = useCallback((newPitch: number) => {
+        if (!Number.isFinite(newPitch)) return;
+        const clamped = Math.min(12, Math.max(-12, newPitch));
+        const rounded = Math.round(clamped * 100) / 100;
+        _setPitchSemitones(rounded);
+        try {
+            window.localStorage.setItem(PITCH_KEY, String(rounded));
+        } catch {
+            // ignore
+        }
+        if (isTauri()) {
+            invoke("set_pitch_semitones", { semitones: rounded }).catch(() => {});
+        }
+    }, []);
+
+    const setCrossfadeSeconds = useCallback((secs: number) => {
+        if (!Number.isFinite(secs)) return;
+        const clamped = Math.min(12, Math.max(0, secs));
+        _setCrossfadeSeconds(clamped);
+        try {
+            window.localStorage.setItem(CROSSFADE_KEY, String(clamped));
+        } catch {
+            // ignore
+        }
+        if (isTauri()) {
+            invoke("set_crossfade", { secs: clamped }).catch(() => {});
         }
     }, []);
 
@@ -717,6 +847,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     if (Number.isFinite(pre)) invoke("set_preamp", { preamp: Math.max(0.5, pre) }).catch(() => {});
                 }
             } catch { /* ignore */ }
+            invoke("set_playback_rate", { rate: playbackRateRef.current }).catch(() => {});
+            invoke("set_pitch_semitones", { semitones: pitchRef.current }).catch(() => {});
+            invoke("set_crossfade", { secs: crossfadeRef.current }).catch(() => {});
         }
     }, []);
 
@@ -844,22 +977,20 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     );
 
     const toggleEqParametric = useCallback(() => {
-        setEqParametric((prev) => {
-            const next = !prev;
-            eqParametricRef.current = next;
-            persistEq(
-                eqEnabledRef.current, eqGainsRef.current, eqAutoRef.current,
-                eqPresetRef.current,
-                next, eqQsRef.current, eqBandHzRef.current,
-                eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
-            );
-            pushEq(
-                eqEnabledRef.current, eqGainsRef.current,
-                next, eqQsRef.current, eqBandHzRef.current,
-                eqBassBoostRef.current, eqTrebleBoostRef.current,
-            );
-            return next;
-        });
+        const next = !eqParametricRef.current;
+        eqParametricRef.current = next;
+        setEqParametric(next);
+        persistEq(
+            eqEnabledRef.current, eqGainsRef.current, eqAutoRef.current,
+            eqPresetRef.current,
+            next, eqQsRef.current, eqBandHzRef.current,
+            eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
+        );
+        pushEq(
+            eqEnabledRef.current, eqGainsRef.current,
+            next, eqQsRef.current, eqBandHzRef.current,
+            eqBassBoostRef.current, eqTrebleBoostRef.current,
+        );
     }, [persistEq, pushEq]);
 
     const setBandCount = useCallback(
@@ -976,42 +1107,38 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, [applyEqGains]);
 
     const toggleEq = useCallback(() => {
-        setEqEnabled((prev) => {
-            const next = !prev;
-            eqEnabledRef.current = next;
-            persistEq(
-                next, eqGainsRef.current, eqAutoRef.current,
-                eqPresetRef.current,
-                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
-                eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
-            );
-            pushEq(
-                next, eqGainsRef.current,
-                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
-                eqBassBoostRef.current, eqTrebleBoostRef.current,
-            );
-            return next;
-        });
+        const next = !eqEnabledRef.current;
+        eqEnabledRef.current = next;
+        setEqEnabled(next);
+        persistEq(
+            next, eqGainsRef.current, eqAutoRef.current,
+            eqPresetRef.current,
+            eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+            eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
+        );
+        pushEq(
+            next, eqGainsRef.current,
+            eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+            eqBassBoostRef.current, eqTrebleBoostRef.current,
+        );
     }, [persistEq, pushEq]);
 
     const toggleEqAuto = useCallback(() => {
-        setEqAuto((prev) => {
-            const next = !prev;
-            eqAutoRef.current = next;
-            persistEq(
-                eqEnabledRef.current, eqGainsRef.current, next,
-                eqPresetRef.current,
-                eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
-                eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
-            );
-            if (next) {
-                const preset = presetForGenre(currentTrackRef.current?.genre);
-                if (preset && eqSourceRef.current !== `auto:${preset.key}`) {
-                    applyEqGains([...preset.gains], `auto:${preset.key}`);
-                }
+        const next = !eqAutoRef.current;
+        eqAutoRef.current = next;
+        setEqAuto(next);
+        persistEq(
+            eqEnabledRef.current, eqGainsRef.current, next,
+            eqPresetRef.current,
+            eqParametricRef.current, eqQsRef.current, eqBandHzRef.current,
+            eqBandCountRef.current, eqBassBoostRef.current, eqTrebleBoostRef.current,
+        );
+        if (next) {
+            const preset = presetForGenre(currentTrackRef.current?.genre);
+            if (preset && eqSourceRef.current !== `auto:${preset.key}`) {
+                applyEqGains([...preset.gains], `auto:${preset.key}`);
             }
-            return next;
-        });
+        }
     }, [persistEq, applyEqGains]);
 
     useEffect(() => {
@@ -1036,6 +1163,26 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             );
         }
     }, []);
+
+    useEffect(() => {
+        if (!isTauri()) return;
+        let disposed = false;
+        let unlistenBy: (() => void) | null = null;
+        let unlistenAbs: (() => void) | null = null;
+        listen<number>("smtc-seek-by", (event) => {
+            if (disposed) return;
+            seekTime(currentTimeRef.current + event.payload);
+        }).then((fn) => (disposed ? fn() : (unlistenBy = fn)));
+        listen<number>("smtc-seek", (event) => {
+            if (disposed) return;
+            seekTime(event.payload);
+        }).then((fn) => (disposed ? fn() : (unlistenAbs = fn)));
+        return () => {
+            disposed = true;
+            unlistenBy?.();
+            unlistenAbs?.();
+        };
+    }, [seekTime]);
 
     async function playNextInternal(): Promise<void> {
         const queue = displayedTracksRef.current;
@@ -1090,6 +1237,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 });
                 setExclusiveActive(active);
                 if (lastRequestedTrackRef.current !== track.file_path) return;
+                markNowPlaying(track);
+                updateSmtc(track, true);
+                notifyNowPlaying(track);
                 invoke("increment_play_count", { filePath: track.file_path }).catch(() => {});
             } catch (error) {
                 console.error("Failed to play track:", error);
@@ -1101,19 +1251,20 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, []);
 
     const toggleExclusive = useCallback(() => {
-        setExclusiveEnabled((prev) => {
-            const next = !prev;
-            exclusiveRef.current = next;
-            try {
-                window.localStorage.setItem(EXCLUSIVE_KEY, next ? "1" : "0");
-            } catch {
-                // localStorage unavailable
-            }
-            if (isTauri() && currentTrackRef.current) {
-                void playTrack(currentTrackRef.current);
-            }
-            return next;
-        });
+        // Compute + persist outside the updater: updaters must stay pure
+        // (StrictMode double-invokes them, which used to restart playback
+        // twice with an audible blip).
+        const next = !exclusiveRef.current;
+        exclusiveRef.current = next;
+        setExclusiveEnabled(next);
+        try {
+            window.localStorage.setItem(EXCLUSIVE_KEY, next ? "1" : "0");
+        } catch {
+            // localStorage unavailable
+        }
+        if (isTauri() && currentTrackRef.current) {
+            void playTrack(currentTrackRef.current);
+        }
     }, [playTrack]);
 
     const togglePlayPause = useCallback(async () => {
@@ -1122,9 +1273,11 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             if (isPausedRef.current) {
                 await invoke("resume_playback");
                 setIsPaused(false);
+                updateSmtc(currentTrackRef.current, true);
             } else {
                 await invoke("pause_playback");
                 setIsPaused(true);
+                updateSmtc(currentTrackRef.current, false);
             }
         } catch (error) {
             console.error("Failed to toggle playback:", error);
@@ -1187,7 +1340,8 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setCurrentTrack(null);
         setCurrentTime(0);
         setCurrentTrackIndex(-1);
-    }, []);
+        updateSmtc(null, false);
+    }, [updateSmtc]);
 
     const playPrev = useCallback(async () => {
         const queue = displayedTracksRef.current;
@@ -1232,6 +1386,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 seekTime,
                 setSelectedDevice,
                 setVolume,
+                playbackRate,
+                pitchSemitones,
+                setPlaybackRate,
+                setPitchSemitones,
+                crossfadeSeconds,
+                setCrossfadeSeconds,
                 toggleExclusive,
                 toggleEq,
                 toggleEqAuto,
@@ -1248,6 +1408,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 setLibraryTracks,
                 setDisplayedTracks,
                 setQueueToLibrary,
+                patchTrack,
                 reorderQueue,
                 togglePlayPause,
                 toggleShuffle,
@@ -1265,6 +1426,14 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 scrobbleToken,
                 setScrobbleEnabled,
                 setScrobbleToken,
+                closeToTray,
+                setCloseToTray,
+                notifyTrack,
+                setNotifyTrack,
+                autostart,
+                setAutostart,
+                smtcEnabled,
+                setSmtcEnabled,
             }}
         >
             {children}

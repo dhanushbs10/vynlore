@@ -59,3 +59,55 @@ export async function scrobbleListenBrainz(
     window.clearTimeout(timeout);
   }
 }
+
+/**
+ * Pings ListenBrainz with the track currently playing ("playing_now"). Sent at
+ * playback start / gapless boundary so the listen state shows up on
+ * ListenBrainz immediately instead of only after completion. Non-fatal — the
+ * finished-listen scrobble is still reported separately by
+ * scrobbleListenBrainz.
+ */
+export async function submitPlayingNow(token: string, track: Track): Promise<boolean> {
+  const clean = (token || "").trim();
+  if (!clean) return false;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(LB_ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Token ${clean}`,
+      },
+      body: JSON.stringify({
+        listen_type: "playing_now",
+        payload: [
+          {
+            track_meta: {
+              track_name: track.title || "Unknown",
+              artist_name: track.artist || "Unknown Artist",
+              release_name: track.album || undefined,
+              additional_info: {
+                duration_ms: Math.round((track.duration_secs || 0) * 1000),
+                media_player: "Vynlore",
+              },
+            },
+          },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.warn("ListenBrainz playing_now rejected:", res.status, body.slice(0, 200));
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("ListenBrainz playing_now failed:", err);
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}

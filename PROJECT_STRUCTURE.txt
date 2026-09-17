@@ -66,6 +66,8 @@ vynlore-audio/
 │       │   │                           #   low-shelf (band 0), peaking (1-8),
 │       │   │                           #   high-shelf (band 9), process_interleaved(),
 │       │   │                           #   coefficient caching, EqSettings (SharedEq)
+│       │   ├── dsp.rs                   # Tempo (WSOLA) + pitch (phase-vocoder) DSP
+│       │   ├── replaygain.rs            # EBU R128-flavour loudness analysis
 │       │   │
 │       │   ├── spectrum.rs             # 64-bin FFT spectrum analyzer:
 │       │   │                           #   push_samples() from output callback,
@@ -82,10 +84,13 @@ vynlore-audio/
 │       │
 │       ├── decoder/                     # *** AUDIO DECODING (Symphonia) ***
 │       │   ├── mod.rs                   # Module declarations
-│       │   └── audio.rs                 # open_audio() — Symphonia format probe + codec
+│       │   ├── audio.rs                 # open_audio() — Symphonia format probe + codec
 │       │                               #   init, decode_packet() — returns interleaved
 │       │                               #   f32 samples via SampleBuffer, seek() — accurate
 │       │                               #   seek with fractional seconds
+│       │   └── waveform.rs              # RMS waveform extraction (versioned DB cache)
+│       │
+│       ├── smtc.rs                      # Windows taskbar media controls
 │       │
 │       └── library/                     # *** LIBRARY / DATABASE ***
 │           ├── mod.rs                   # Module declarations
@@ -93,8 +98,8 @@ vynlore-audio/
 │           │                           #   tracks, playlists, likes, play counts,
 │           │                           #   recently played, prune_missing_files()
 │           ├── scanner.rs              # scan_folder_with_progress(): walks directory,
-│           │                           #   reads metadata (symphonia), extracts cover
-│           │                           #   art, inserts into DB
+│           │                           #   reads metadata (lofty), extracts cover
+│           │                           #   art, ReplayGain analysis, inserts into DB
 │           ├── metadata.rs             # Audio metadata extraction helpers
 │           └── watcher.rs              # Filesystem watcher (notify crate):
 │                                       #   start_watcher(), detects added/removed files,
@@ -117,7 +122,7 @@ vynlore-audio/
 │   ├── types.ts                         # Track, AudioDevice, ToastMessage, RepeatMode
 │   │
 │   ├── context/
-│   │   └── PlayerContext.tsx            # *** GLOBAL PLAYER STATE ***
+│   │   ├── PlayerContext.tsx            # *** GLOBAL PLAYER STATE ***
 │   │                                   #   volume, currentTime, isPlaying/isPaused,
 │   │                                   #   currentTrack, queue, shuffle, repeat,
 │   │                                   #   EQ settings (enabled/gains/auto/preset),
@@ -128,12 +133,21 @@ vynlore-audio/
 │   │                                   #   Tauri event listeners: playback-ended,
 │   │                                   #   track-changed, media-key
 │   │                                   #   Gapless sync: queue_next_track effect
+│   │   └── ThemeContext.tsx             # Custom skins (import/export/delete)
+│   │
+│   ├── themes.ts                        # Built-in skins + skin file format
+│   │
+│   ├── hooks/
+│   │   └── useScrobbling.ts             # ListenBrainz queue + retry
 │   │
 │   ├── audio/
-│   │   └── eqPresets.ts               # 13 EQ presets (flat, rock, pop, jazz,
-│   │                                  #   classical, electronic, hip-hop, folk,
-│   │                                  #   metal, country, bass boost, treble boost,
-│   │                                  #   vocal) + genre-to-preset mapping
+│   │   ├── eqPresets.ts               # 13 EQ presets (flat, rock, pop, jazz,
+│   │   │                              #   classical, electronic, hip-hop, folk,
+│   │   │                              #   metal, country, bass boost, treble boost,
+│   │   │                              #   vocal) + genre-to-preset mapping
+│   │   ├── autoeq.ts                  # AutoEQ profile import
+│   │   ├── lyrics.ts                  # LRCLIB online lyrics + cache
+│   │   └── scrobble.ts                # ListenBrainz scrobbling
 │   │
 │   ├── components/
 │   │   │
@@ -197,10 +211,7 @@ vynlore-audio/
 │   │   ├── shuffle.ts                 # Fisher-Yates shuffle utility
 │   │   └── artists.ts                # Artist name normalization
 │   │
-│   └── styles/                        # Legacy CSS (mostly migrated to Tailwind)
-│       ├── App.css
-│       ├── toast.css
-│       └── variables.css
+│   └── styles/                        # (empty — Toast + faders use Tailwind now)
 │
 ├── index.html                         # Vite HTML entry point
 ├── vite.config.ts                     # Vite config (Tauri plugin)
@@ -209,8 +220,7 @@ vynlore-audio/
 ├── package.json                       # NPM dependencies (React, framer-motion,
 │                                      #   lucide-react, @tauri-apps/*)
 ├── package-lock.json
-├── build_export.cjs                   # Build/export utility scripts
-├── build_export.js
+├── build_export.js                    # Project-export helper script
 ├── TECH_STACK.md                      # Tech stack documentation
 ├── .gitignore
 └── library.db*                        # SQLite DB copies (dev artifact)

@@ -69,6 +69,22 @@ pub struct TrackMetadata {
   pub lyrics: String,
   pub track_gain: Option<f64>,
   pub track_peak: Option<f64>,
+  pub bitrate: u32,
+}
+
+/// (mtime_secs, size_bytes) for a path, or (0,0) when the file can't be
+/// stat'ed. Used to skip unchanged files during rescan and to guard against
+/// reading files mid-write.
+pub fn file_signature(path: &Path) -> (i64, i64) {
+  let Ok(m) = std::fs::metadata(path) else { return (0, 0) };
+  let size = m.len() as i64;
+  let mtime = m
+    .modified()
+    .ok()
+    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+    .map(|d| d.as_secs() as i64)
+    .unwrap_or(0);
+  (mtime, size)
 }
 
 /// Extensions the scanner/watcher accept. Keep in sync with the enabled
@@ -125,6 +141,7 @@ pub fn read_metadata(path: &Path, cover_dir: &Path) -> Result<TrackMetadata, Box
   let sample_rate = props.sample_rate().unwrap_or(0);
   let bit_depth = props.bit_depth().unwrap_or(0) as u32;
   let channels = props.channels().unwrap_or(0);
+  let bitrate = props.audio_bitrate().unwrap_or(0);
 
   let format = path
     .extension()
@@ -151,7 +168,27 @@ pub fn read_metadata(path: &Path, cover_dir: &Path) -> Result<TrackMetadata, Box
     }
     let ext = match picture.mime_type() {
       lofty::MimeType::Png => "png",
-      _ => "jpg",
+      lofty::MimeType::Jpeg => "jpg",
+      // Anything else (BMP/GIF/TIFF/WebP/unknown): sniff the magic bytes so
+      // the file lands with an extension viewers can actually decode instead
+      // of a lying ".jpg".
+      _ => {
+        if data.len() >= 12
+          && (data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP".as_slice())
+            || data.starts_with(b"GIF8"))
+        {
+          if data.starts_with(b"GIF8") { "gif" } else { "webp" }
+        } else if data.len() >= 2 && data.starts_with(b"BM") {
+          "bmp"
+        } else if data.len() >= 4
+          && (data.starts_with(b"\x89PNG") || data.starts_with(b"\xff\xd8\xff"))
+        {
+          if data.starts_with(b"\x89PNG") { "png" } else { "jpg" }
+        } else {
+          // Unknown payload: keep the bytes but don't pretend it's a JPEG.
+          "bin"
+        }
+      }
     };
     fs::create_dir_all(cover_dir)?;
     let out_path = cover_dir.join(format!("{:016x}.{}", hash, ext));
@@ -181,6 +218,7 @@ pub fn read_metadata(path: &Path, cover_dir: &Path) -> Result<TrackMetadata, Box
     lyrics: get_lyrics(tag),
     track_gain: None,
     track_peak: None,
+    bitrate,
   })
 }
 

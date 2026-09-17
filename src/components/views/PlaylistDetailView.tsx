@@ -105,8 +105,10 @@ export function PlaylistDetailView({ playlistId, playTrack, onBack }: PlaylistDe
         filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
       });
       if (selected) {
-        await invoke("set_playlist_cover", { playlistId, coverPath: selected });
-        setCoverPath(selected);
+        // The backend copies the image into managed storage and returns the
+        // stored path — keep that, not the (possibly out-of-scope) source.
+        const stored = await invoke<string>("set_playlist_cover", { playlistId, coverPath: selected });
+        setCoverPath(stored);
       }
     } catch (err) {
       console.error("Failed to set cover:", err);

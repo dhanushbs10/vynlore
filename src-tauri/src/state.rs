@@ -15,6 +15,9 @@ pub struct AppState {
 	pub balance: Arc<AtomicU32>,
 	pub preamp: Arc<AtomicU32>,
 	pub replaygain_mode: Arc<AtomicU32>,
+	pub playback_rate: Arc<AtomicU32>,
+	pub pitch_semitones: Arc<AtomicU32>,
+	pub crossfade: Arc<AtomicU32>,
 	pub cover_dir: PathBuf,
 }
 

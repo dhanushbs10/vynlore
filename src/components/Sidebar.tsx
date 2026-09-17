@@ -17,7 +17,7 @@ interface Props {
   onOpenSettings?: () => void;
   devices?: AudioDevice[];
   selectedDevice?: number | null;
-  onSelectDevice?: (index: number) => void;
+  onSelectDevice?: (index: number | null) => void;
 }
 
 export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanning, scanProgress, hasFolder, onOpenSearch, onToggleEq, onOpenSettings, devices, selectedDevice, onSelectDevice }: Props) {
@@ -66,7 +66,7 @@ export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanni
           <select
             className="w-full px-3 py-2 rounded-lg border border-border bg-bg-raised text-text text-xs cursor-pointer focus:outline-none focus:border-white-30 transition-colors appearance-none"
             value={selectedDevice ?? ""}
-            onChange={(e) => onSelectDevice(Number(e.target.value))}
+            onChange={(e) => onSelectDevice(e.target.value === "" ? null : Number(e.target.value))}
           >
             <option value="">System Default</option>
             {devices.map((d) => (
@@ -129,16 +129,6 @@ export function Sidebar({ onAddFolder, onRescan, currentView, onNavClick, scanni
       )}
 
       <div className="p-3 border-t border-border flex gap-2 items-stretch">
-        {onOpenSettings && (
-          <button
-            className="py-2 px-2.5 border border-border text-sm font-medium text-text-secondary cursor-pointer hover:text-text transition-colors"
-            onClick={onOpenSettings}
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings size={14} />
-          </button>
-        )}
         <button
           disabled={scanning}
           className="flex-1 py-2 px-3 border border-border text-sm font-medium text-text-secondary cursor-pointer hover:text-text transition-colors disabled:opacity-40 disabled:cursor-not-allowed"

@@ -7,6 +7,7 @@ import type { Track } from "../../types";
 interface HomeViewProps {
   libraryTracks: Track[];
   recentlyPlayed?: Track[];
+  topPlayed?: Track[];
   playTrack: (track: Track, queue?: Track[]) => void;
   onExpandTrack: (track: Track, queue?: Track[]) => void;
   watchedFolder: string | null;
@@ -78,7 +79,7 @@ function buildSuggestions(recent: Track[], library: Track[]) {
   return suggestions;
 }
 
-export function HomeView({ libraryTracks, recentlyPlayed = [], playTrack, onExpandTrack, watchedFolder, onSelectFolder, scanning, scanProgress }: HomeViewProps) {
+export function HomeView({ libraryTracks, recentlyPlayed = [], topPlayed = [], playTrack, onExpandTrack, watchedFolder, onSelectFolder, scanning, scanProgress }: HomeViewProps) {
   const recentlyAdded = useMemo(() => {
     return [...libraryTracks].sort((a, b) => b.id - a.id).slice(0, 20);
   }, [libraryTracks]);
@@ -144,6 +145,16 @@ export function HomeView({ libraryTracks, recentlyPlayed = [], playTrack, onExpa
           <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide" style={{ scrollbarWidth: "none" }}>
             {recentlyPlayed.map((track) => (
               <HorizontalCard key={`rp-${track.id}`} track={track} queue={recentlyPlayed} playTrack={playTrack} onExpandTrack={onExpandTrack} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {topPlayed.length > 0 && (
+        <Section title="Top Played">
+          <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide" style={{ scrollbarWidth: "none" }}>
+            {topPlayed.map((track) => (
+              <HorizontalCard key={`tp-${track.id}`} track={track} queue={topPlayed} playTrack={playTrack} onExpandTrack={onExpandTrack} />
             ))}
           </div>
         </Section>

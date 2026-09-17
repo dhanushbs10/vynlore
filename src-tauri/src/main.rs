@@ -7,11 +7,46 @@ mod audio;
 mod decoder;
 mod error;
 mod library;
+mod smtc;
 mod state;
 
 use state::AppState;
 use library::db::LibraryDb;
 use library::scanner::scan_folder_with_progress as scan_folder_internal;
+
+/// Per-process preference switches the frontend sets via commands.
+pub static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(true);
+pub static NOTIFY_TRACK_CHANGE: AtomicBool = AtomicBool::new(true);
+
+/// Post a notification about the track now playing, but only when the window
+/// is unfocused and track notifications are enabled — a gapless boundary
+/// otherwise spams the action center on every track.
+pub fn notify_track_change(app: &tauri::AppHandle, title: &str, artist: &str, album: &str) {
+  if !NOTIFY_TRACK_CHANGE.load(Ordering::Relaxed) {
+    return;
+  }
+  if let Some(w) = app.get_webview_window("main") {
+    if w.is_focused().unwrap_or(false) {
+      return;
+    }
+  }
+  use tauri_plugin_notification::NotificationExt;
+  let body = if artist.is_empty() && album.is_empty() {
+    "Now playing".to_string()
+  } else if artist.is_empty() {
+    format!("{}\nNow playing", album)
+  } else if album.is_empty() {
+    format!("{}\nNow playing", artist)
+  } else {
+    format!("{} – {}\nNow playing", artist, album)
+  };
+  let _ = app
+    .notification()
+    .builder()
+    .title(title.to_string())
+    .body(body)
+    .show();
+}
 use library::watcher::WatcherEvent;
 
 fn main() {
@@ -24,12 +59,28 @@ fn main() {
 
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_notification::init())
+    .plugin(tauri_plugin_autostart::init(
+      tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+      None,
+    ))
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        // Default behaviour: minimize to the tray instead of quitting, so
+        // playback keeps the library alive in the background. The tray
+        // "Quit" item bypasses this via app.exit().
+        if CLOSE_TO_TRAY.load(Ordering::Relaxed) {
+          let _ = window.hide();
+          api.prevent_close();
+        }
+      }
+    })
     .plugin({
       use std::str::FromStr;
       use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
-      let play_pause = Shortcut::from_str("MediaPlayPause").unwrap();
-      let next = Shortcut::from_str("MediaTrackNext").unwrap();
-      let prev = Shortcut::from_str("MediaTrackPrevious").unwrap();
+      let play_pause = Shortcut::from_str("MediaPlayPause").expect("valid media-key shortcut");
+      let next = Shortcut::from_str("MediaTrackNext").expect("valid media-key shortcut");
+      let prev = Shortcut::from_str("MediaTrackPrevious").expect("valid media-key shortcut");
       match tauri_plugin_global_shortcut::Builder::new()
         .with_shortcuts(["MediaPlayPause", "MediaTrackNext", "MediaTrackPrevious"])
         .and_then(|b| Ok(b))
@@ -61,7 +112,7 @@ fn main() {
     .setup(|app| {
       let db_path = match app.path().app_data_dir() {
         Ok(dir) => dir.join("library.db"),
-        Err(e) => { eprintln!("Failed to get app data dir: {}", e); return Ok(()); }
+        Err(e) => panic!("Failed to get app data dir (cannot run without state): {}", e),
       };
       if let Some(parent) = db_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
@@ -135,11 +186,21 @@ fn main() {
       }
 
       // Files deleted/moved while the app was off would otherwise linger as
-      // unplayable ghost entries.
-      match db.prune_missing_files() {
-        Ok(n) if n > 0 => println!("Pruned {} missing track(s) from library", n),
-        Ok(_) => {}
-        Err(e) => eprintln!("Library prune failed: {}", e),
+      // unplayable ghost entries. Guard: if a folder IS configured but its
+      // drive/path is unreachable right now (unplugged USB, sleeping NAS),
+      // pruning would nuke the entire library including likes and playlists —
+      // skip it instead of destroying data.
+      let watched_gone = commands::get_watched_folder(app.handle().clone())
+        .map(|opt| opt.map(|f| !std::path::Path::new(&f).is_dir()).unwrap_or(false))
+        .unwrap_or(false);
+      if watched_gone {
+        eprintln!("Watched folder unreachable — skipping library prune to protect data");
+      } else {
+        match db.prune_missing_files() {
+          Ok(n) if n > 0 => println!("Pruned {} missing track(s) from library", n),
+          Ok(_) => {}
+          Err(e) => eprintln!("Library prune failed: {}", e),
+        }
       }
 
       let state = AppState {
@@ -151,9 +212,61 @@ fn main() {
         balance: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
         preamp: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
         replaygain_mode: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1)),
+        playback_rate: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
+        pitch_semitones: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
+        crossfade: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
         cover_dir: cover_dir.clone(),
       };
       app.manage(state);
+
+      // Windows taskbar / SMTC media controls. Failure is non-fatal (e.g.
+      // non-Windows or a missing window) but Vynlore is Windows-only anyway.
+      if let Err(e) = crate::smtc::start(app.handle()) {
+        eprintln!("SMTC unavailable: {}", e);
+      }
+
+      // System tray: playback control + app lifecycle. The tray always exists
+      // so playback can be controlled and relaunched with no visible window
+      // (close-to-tray is the default close behaviour above).
+      {
+        use tauri::menu::{Menu, MenuItem};
+        use tauri::tray::TrayIconBuilder;
+        let show = MenuItem::with_id(app, "show", "Show Vynlore", true, None::<&str>)?;
+        let play_pause =
+          MenuItem::with_id(app, "play-pause", "Play / Pause", true, None::<&str>)?;
+        let next = MenuItem::with_id(app, "next", "Next", true, None::<&str>)?;
+        let prev = MenuItem::with_id(app, "prev", "Previous", true, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+        let menu = Menu::with_items(app, &[&show, &play_pause, &next, &prev, &quit])?;
+        let mut builder = TrayIconBuilder::new()
+          .menu(&menu)
+          .show_menu_on_left_click(false)
+          .tooltip("Vynlore")
+          .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+              if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+              }
+            }
+            "play-pause" | "next" | "prev" => {
+              let _ = app.emit("media-key", event.id.as_ref());
+            }
+            "quit" => app.exit(0),
+            _ => {}
+          });
+        if let Some(icon) = app.default_window_icon() {
+          builder = builder.icon(icon.clone());
+          let _ = builder.build(app);
+        } else {
+          // No embedded icon available; a tray icon is mandatory on Windows,
+          // so fall back to the bundled 512px PNG.
+          use tauri::image::Image;
+          if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png").as_slice()) {
+            let _ = builder.icon(icon).build(app);
+          }
+        }
+      }
 
       let spectrum = app.state::<AppState>().spectrum.clone();
       let app_handle_clone = app.handle().clone();
@@ -177,9 +290,10 @@ fn main() {
             } else {
               continue;
             };
+            let (peak, clipped) = spectrum.levels();
             let _ = app_handle_clone.emit(
               "spectrum-data",
-              crate::audio::spectrum::SpectrumPayload { bins },
+              crate::audio::spectrum::SpectrumPayload { bins, peak, clipped },
             );
             was_active = active;
           }
@@ -206,6 +320,7 @@ fn main() {
                     artist: folder_path.clone(),
                     count,
                     total: Some(total),
+                    kind: Some("scan".to_string()),
                   });
                 }
               },
@@ -226,6 +341,7 @@ fn main() {
                 artist: folder_path,
                 count,
                 total: None,
+                kind: Some("scan".to_string()),
               });
             }
             Ok(Err(e)) => {
@@ -253,10 +369,13 @@ fn main() {
         {
           if audio_exts.contains(&ext.to_lowercase().as_str()) {
             // This runs in setup(), before the webview has registered its
-            // "open-file" listener — defer the emit so it isn't lost.
+            // "open-file" listener — defer the emit so it isn't lost. Emit
+            // twice (fast + slow boot cover); the frontend dedups by path.
             let app_for_emit = app.handle().clone();
             std::thread::spawn(move || {
               std::thread::sleep(std::time::Duration::from_millis(1200));
+              let _ = app_for_emit.emit("open-file", arg.clone());
+              std::thread::sleep(std::time::Duration::from_millis(2800));
               let _ = app_for_emit.emit("open-file", arg);
             });
             break;
@@ -274,8 +393,23 @@ fn main() {
       commands::set_volume,
       commands::set_balance,
       commands::set_preamp,
+      commands::set_playback_rate,
+      commands::set_pitch_semitones,
+      commands::set_crossfade,
       commands::set_replaygain_mode,
       commands::pause_playback,
+      smtc::set_smtc_enabled,
+      smtc::update_smtc_metadata,
+      commands::set_close_to_tray,
+      commands::get_close_to_tray,
+      commands::set_notify_track,
+      commands::get_notify_track,
+      commands::notify_now_playing,
+      commands::set_autostart,
+      commands::get_autostart,
+      commands::read_playlist_file,
+      commands::write_playlist_file,
+      commands::edit_tags,
       commands::resume_playback,
       commands::play_track,
       commands::stop_playback,
@@ -286,6 +420,8 @@ fn main() {
       commands::increment_play_count,
       commands::add_external_track,
       commands::get_recently_played,
+      commands::get_recently_added,
+      commands::get_top_played,
       commands::create_playlist,
       commands::get_playlists,
       commands::add_track_to_playlist,

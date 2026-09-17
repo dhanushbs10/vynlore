@@ -1,4 +1,5 @@
 pub mod config;
+pub mod dsp;
 pub mod eq;
 pub mod output;
 pub mod player;

@@ -5,7 +5,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
 import { formatDuration } from "../utils/format";
-import { Play, Pause, SkipBack, SkipForward, Volume2, Shuffle, Repeat, Repeat1, Heart, ListPlus, Zap } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Volume2, Shuffle, Repeat, Repeat1, Heart, ListPlus, Zap, Gauge } from "lucide-react";
 
 export default function PlayerBar({ onExpandCurrentTrack }: { onExpandCurrentTrack?: () => void }) {
 const {
@@ -16,9 +16,13 @@ currentTime,
 isShuffle,
 repeatMode,
 volume,
-exclusiveEnabled,
-exclusiveActive,
-setVolume,
+  exclusiveEnabled,
+  exclusiveActive,
+  playbackRate,
+  pitchSemitones,
+  setVolume,
+  setPlaybackRate,
+  setPitchSemitones,
 seekTime,
 togglePlayPause,
 toggleShuffle,
@@ -31,7 +35,27 @@ const [isLiked, setIsLiked] = useState(false);
 const [showPlaylistDropdown, setShowPlaylistDropdown] = useState(false);
 const [playlists, setPlaylists] = useState<{ id: number; name: string }[]>([]);
 const [showExclWarning, setShowExclWarning] = useState(false);
+const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+const [speedAnchor, setSpeedAnchor] = useState<{ right: number } | null>(null);
 const playlistDropdownRef = useRef<HTMLDivElement>(null);
+const speedMenuRef = useRef<HTMLDivElement>(null);
+const speedButtonRef = useRef<HTMLButtonElement>(null);
+const speedPopupRef = useRef<HTMLDivElement>(null);
+
+useEffect(() => {
+  if (!showSpeedMenu) return;
+  const handleClick = (e: MouseEvent) => {
+    const t = e.target as Node;
+    if (
+      (!speedMenuRef.current || !speedMenuRef.current.contains(t)) &&
+      (!speedPopupRef.current || !speedPopupRef.current.contains(t))
+    ) {
+      setShowSpeedMenu(false);
+    }
+  };
+  document.addEventListener("mousedown", handleClick);
+  return () => document.removeEventListener("mousedown", handleClick);
+}, [showSpeedMenu]);
 
 useEffect(() => {
   if (!showPlaylistDropdown) return;
@@ -243,6 +267,71 @@ return (
           </span>
         )}
       </button>
+      <div className="relative" ref={speedMenuRef}>
+        <button
+          ref={speedButtonRef}
+          onClick={() => {
+            if (!showSpeedMenu) {
+              const r = speedButtonRef.current?.getBoundingClientRect();
+              if (r) setSpeedAnchor({ right: window.innerWidth - r.right });
+            }
+            setShowSpeedMenu((s) => !s);
+          }}
+          title="Playback speed & pitch"
+          className={`inline-flex items-center gap-1 bg-transparent border-none cursor-pointer p-0.5 rounded transition-colors ${playbackRate !== 1 || pitchSemitones !== 0 ? "text-white" : "text-text-muted hover:text-text"}`}
+        >
+          <Gauge size={13} />
+          <span className="text-[10px] font-extrabold tracking-wider tabular-nums">{Math.round(playbackRate * 100) / 100}x</span>
+        </button>
+        {showSpeedMenu &&
+          createPortal(
+            <div
+              ref={speedPopupRef}
+              className="fixed z-[1000] bg-bg-raised border border-border rounded-md p-3 shadow-lg shadow-black-50 w-[220px]"
+              style={{
+                right: speedAnchor?.right ?? 16,
+                bottom: 100,
+              }}
+            >
+              <div className="text-[10px] font-bold tracking-wider uppercase text-text-muted mb-2">Speed</div>
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {[0.5, 0.75, 0.9, 1, 1.25, 1.5, 2].map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setPlaybackRate(r)}
+                    className={`px-2 py-1 rounded text-[11px] border transition-colors ${Math.abs(playbackRate - r) < 1e-6 ? "bg-white text-black border-transparent" : "bg-bg-surface border-border text-text-muted hover:text-text hover:bg-bg-hover"}`}
+                  >
+                    {r}x
+                  </button>
+                ))}
+              </div>
+              <div className="text-[10px] font-bold tracking-wider uppercase text-text-muted mb-2 flex items-center justify-between">
+                <span>Pitch</span>
+                <span className="text-text tabular-nums">{pitchSemitones > 0 ? "+" : ""}{pitchSemitones.toFixed(1)} st</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="-6"
+                  max="6"
+                  step="0.5"
+                  value={pitchSemitones}
+                  onChange={(e) => setPitchSemitones(Number(e.target.value))}
+                  className="w-full"
+                />
+                {pitchSemitones !== 0 && (
+                  <button
+                    onClick={() => setPitchSemitones(0)}
+                    className="text-[10px] text-text-muted hover:text-text whitespace-nowrap border border-border rounded px-1.5 py-0.5"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>,
+            document.body
+          )}
+      </div>
       <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase bg-bg-surface text-text-muted rounded border border-border">
         {formatLabel}
       </span>

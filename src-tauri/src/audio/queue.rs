@@ -29,6 +29,9 @@ impl SampleQueue {
 
 	pub fn push_all(&self, samples: &[f32]) -> bool {
 		let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+		if state.capacity == 0 {
+			return false;
+		}
 		let mut offset = 0;
 		loop {
 			if state.closed {
@@ -49,7 +52,7 @@ impl SampleQueue {
 			.not_full
 			.wait_timeout(state, Duration::from_millis(100))
 			.unwrap_or_else(|e| e.into_inner());
-			state = guard;
+		state = guard;
 		}
 	}
 

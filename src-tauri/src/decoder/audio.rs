@@ -1,4 +1,4 @@
-use symphonia::core::audio::SampleBuffer;
+use symphonia::core::audio::{SampleBuffer, SignalSpec};
 use symphonia::core::codecs::{Decoder as SymphoniaDecoder, DecoderOptions};
 use symphonia::core::formats::{FormatOptions, FormatReader};
 use symphonia::core::io::MediaSourceStream;
@@ -13,6 +13,7 @@ pub struct AudioFileDecoder {
 	decoder: Box<dyn SymphoniaDecoder>,
 	track_id: u32,
 	sample_buf: Option<SampleBuffer<f32>>,
+	sample_spec: Option<SignalSpec>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +21,9 @@ pub struct AudioFormat {
 	pub sample_rate: u32,
 	pub channels: u16,
 	pub bit_depth: u16,
+	/// Total audio frames when the container reports it (None for streams
+	/// like raw MP3 where only decoding reveals the length).
+	pub total_frames: Option<u64>,
 }
 
 pub fn open_audio(path: &std::path::Path) -> Result<(AudioFileDecoder, AudioFormat), AudioError> {
@@ -37,21 +41,27 @@ pub fn open_audio(path: &std::path::Path) -> Result<(AudioFileDecoder, AudioForm
 
 	let format = probed.format;
 
-	let track = format
-		.tracks()
-		.first()
-		.ok_or_else(|| AudioError::DecodingError("No track found".to_string()))?;
-
-	let track_id = track.id;
-	let params = track.codec_params.clone();
+	// Take the first track the codec registry can actually decode, not
+	// blindly tracks()[0]: multi-stream files (MP4/MKV with a cover-art or
+	// video stream first) would otherwise decode the wrong stream or fail.
+	let mut chosen: Option<(u32, symphonia::core::codecs::CodecParameters, Box<dyn SymphoniaDecoder>)> = None;
+	for track in format.tracks() {
+		let params = track.codec_params.clone();
+		match get_codecs().make(&params, &DecoderOptions::default()) {
+			Ok(decoder) => {
+				chosen = Some((track.id, params, decoder));
+				break;
+			}
+			Err(_) => continue,
+		}
+	}
+	let (track_id, params, decoder) =
+		chosen.ok_or_else(|| AudioError::DecodingError("No decodable audio track found".to_string()))?;
 
 	let sample_rate = params.sample_rate.unwrap_or(44100);
 	let channels = params.channels.map_or(2, |c| c.count() as u16);
 	let bit_depth = params.bits_per_sample.unwrap_or(16) as u16;
-
-	let decoder = get_codecs()
-		.make(&params, &DecoderOptions::default())
-		.map_err(|e| AudioError::DecodingError(e.to_string()))?;
+	let total_frames = params.n_frames;
 
 	Ok((
 		AudioFileDecoder {
@@ -59,11 +69,13 @@ pub fn open_audio(path: &std::path::Path) -> Result<(AudioFileDecoder, AudioForm
 			decoder,
 			track_id,
 			sample_buf: None,
+			sample_spec: None,
 		},
 		AudioFormat {
 			sample_rate,
 			channels,
 			bit_depth,
+			total_frames,
 		},
 	))
 }
@@ -92,10 +104,16 @@ pub fn decode_packet(decoder: &mut AudioFileDecoder) -> Option<Vec<f32>> {
 				// decoded packet needs more room than the current one — a
 				// SampleBuffer sized from the first packet silently truncates
 				// later, larger packets (audible ticks/static on some files).
+				// A mid-stream spec change (channels/rate) also forces a fresh
+				// buffer so the interleave copy can't mismatch.
 				let needs = audio_buf_ref.frames() as u64;
+				let spec_changed = decoder.sample_spec.map_or(true, |s| s != spec);
 				match decoder.sample_buf.as_ref() {
-					Some(existing) if existing.capacity() as u64 >= needs => {}
-					_ => decoder.sample_buf = Some(SampleBuffer::<f32>::new(needs, spec)),
+					Some(existing) if !spec_changed && existing.capacity() as u64 >= needs => {}
+					_ => {
+						decoder.sample_buf = Some(SampleBuffer::<f32>::new(needs, spec));
+						decoder.sample_spec = Some(spec);
+					}
 				}
 
 				if let Some(sample_buf) = decoder.sample_buf.as_mut() {
@@ -110,6 +128,7 @@ pub fn decode_packet(decoder: &mut AudioFileDecoder) -> Option<Vec<f32>> {
 
 pub fn seek(decoder: &mut AudioFileDecoder, seek_secs: f64) -> Result<(), AudioError> {
 	decoder.sample_buf = None;
+	decoder.sample_spec = None;
 	let whole = seek_secs.floor();
 	let frac = seek_secs - whole;
 

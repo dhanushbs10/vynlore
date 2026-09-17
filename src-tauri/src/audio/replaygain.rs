@@ -58,11 +58,12 @@ impl KWeight {
 			[1.0, hp_a1 / hp_a0, hp_a2 / hp_a0],
 		];
 
-		// RBJ high-shelf, 1681 Hz, +4 dB (R128 stage two).
-		let a = 10f64.powf(4.0 / 20.0);
-		let shelf_w0 = 2.0 * std::f64::consts::PI * 1681.0 / fs;
-		let (s_sin, s_cos) = shelf_w0.sin_cos();
-		let s_alpha = s_sin / 2.0 * a.sqrt();
+	// RBJ high-shelf, 1681 Hz, +4 dB (R128 stage two). Cookbook slope S=1
+	// gives alpha = sin(w0)/2 * sqrt(2).
+	let a = 10f64.powf(4.0 / 20.0);
+	let shelf_w0 = 2.0 * std::f64::consts::PI * 1681.0 / fs;
+	let (s_sin, s_cos) = shelf_w0.sin_cos();
+	let s_alpha = s_sin / 2.0 * 2f64.sqrt();
 		let sq = 2.0 * a.sqrt() * s_alpha;
 		let sh_b0 = a * ((a + 1.0) + (a - 1.0) * s_cos + sq);
 		let sh_b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * s_cos);
@@ -134,7 +135,9 @@ pub fn analyze(path: &Path) -> Result<ReplayGainResult, String> {
 		};
 		// samples are interleaved f32 PCM from the decoder
 		for (i, &s) in samples.iter().enumerate() {
-			let c = i % ch;
+			// The K-weighting state is stereo; fold any extra channels
+			// (5.1/7.1) into the pair instead of indexing out of bounds.
+			let c = (i % ch).min(1);
 			let v = s as f64;
 			peak = peak.max(v.abs());
 			let weighted = weight.process(c, v);
@@ -224,4 +227,57 @@ pub fn resolve_gain(
 		}
 	}
 	g.max(0.05)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn approx(a: f32, b: f32) -> bool {
+		(a - b).abs() < 1e-3
+	}
+
+	#[test]
+	fn mode_off_returns_unity() {
+		assert_eq!(resolve_gain(0, Some(8.0), Some(-4.0), None), 1.0);
+		assert_eq!(resolve_gain(0, None, None, Some(0.1)), 1.0);
+	}
+
+	#[test]
+	fn track_mode_uses_track_gain() {
+		let g = resolve_gain(1, Some(6.0), Some(-3.0), None);
+		assert!(approx(g, 10f32.powf(6.0 / 20.0)), "got {g}");
+	}
+
+	#[test]
+	fn album_mode_uses_album_gain_and_falls_back_to_track() {
+		let g = resolve_gain(2, None, Some(0.0), None);
+		assert!(approx(g, 1.0), "album 0dB should be unity, got {g}");
+		let fallback = resolve_gain(2, Some(6.0), None, None);
+		assert!(approx(fallback, 10f32.powf(6.0 / 20.0)), "got {fallback}");
+	}
+
+	#[test]
+	fn peak_guard_caps_the_scalar() {
+		// A track peaking at full scale can never be boosted above 0.98.
+		let g = resolve_gain(1, Some(12.0), None, Some(1.0));
+		assert!(g as f64 <= 0.98 + 1e-6, "peak guard failed: {g}");
+		// Non-peaky track keeps its full boost.
+		let g2 = resolve_gain(1, Some(12.0), None, Some(0.2));
+		assert!(approx(g2, 10f32.powf(12.0 / 20.0)), "got {g2}");
+	}
+
+	#[test]
+	fn missing_gain_means_transparent() {
+		assert_eq!(resolve_gain(1, None, None, None), 1.0);
+		assert_eq!(resolve_gain(2, None, None, None), 1.0);
+	}
+
+	#[test]
+	fn scalar_clamps_to_sane_range() {
+		assert!(approx(scalar_from_db(-1000.0), 0.05));
+		assert!(approx(scalar_from_db(40.0), 4.0));
+		assert_eq!(scalar_from_db(f64::NAN), 1.0);
+		assert_eq!(scalar_from_db(f64::INFINITY), 1.0);
+	}
 }

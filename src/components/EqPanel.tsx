@@ -17,6 +17,7 @@ import {
   MAX_BAND_COUNT,
 } from "../audio/eqPresets";
 import { parseAutoEq, autoEqToVynlore } from "../audio/autoeq";
+import { LevelMeter } from "./LevelMeter";
 
 interface EqPanelProps {
   open: boolean;
@@ -251,6 +252,8 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
       }
       const { gains, qs, bandHz } = autoEqToVynlore(result);
       setEqFreqs(bandHz);
+      // Enable parametric mode outright — toggling would turn it OFF when the
+      // user already had it on.
       if (!eqParametric) toggleEqParametric();
       for (let i = 0; i < gains.length; i++) setEqBand(i, gains[i]);
       for (let i = 0; i < qs.length; i++) setEqBandQ(i, qs[i]);
@@ -369,6 +372,10 @@ export const EqPanel: React.FC<EqPanelProps> = ({ open, onClose }) => {
                   {balanceLabel(balance)}
                 </button>
               </div>
+
+              {/* Output meter */}
+              <div className="w-6 h-px bg-white-4" />
+              <LevelMeter className="px-1" />
             </div>
 
             {/* ─── CENTER ─── */}

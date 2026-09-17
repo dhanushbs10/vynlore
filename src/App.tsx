@@ -21,6 +21,7 @@ import { HomeView } from "./components/views/HomeView";
 import PlayerBar from "./components/PlayerBar";
 import { SearchPalette } from "./components/SearchPalette";
 import { SettingsModal } from "./components/SettingsModal";
+import { EditTagsModal } from "./components/EditTagsModal";
 import { Toast } from "./components/Toast";
 import type { Track, ToastMessage, AudioDevice } from "./types";
 
@@ -28,7 +29,7 @@ export type { Track };
 
 export type View = "now" | "browse" | "albums" | "artists" | "playlists" | "playlist-detail" | "genres" | "genre-detail" | "album-detail" | "artist-detail";
 
-type WatcherPayload = { title: string; artist: string; count: number; total?: number | null };
+type WatcherPayload = { title: string; artist: string; count: number; total?: number | null; kind?: string | null };
 
 function AppInner() {
   const [currentView, setCurrentView] = useState<View>("now");
@@ -45,7 +46,9 @@ function AppInner() {
   const [watchedFolder, setWatchedFolder] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState<{ scanned: number; total: number | null } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [editTrack, setEditTrack] = useState<Track | null>(null);
   const [recentlyPlayed, setRecentlyPlayed] = useState<Track[]>([]);
+  const [topPlayed, setTopPlayed] = useState<Track[]>([]);
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const {
     currentTrackIndex,
@@ -54,6 +57,7 @@ function AppInner() {
     displayedTracks,
     setLibraryTracks,
     setQueueToLibrary,
+    patchTrack,
     playTrack,
     togglePlayPause,
     seekTime,
@@ -83,7 +87,12 @@ function AppInner() {
       }
       if (typing) return;
 
-      if (e.code === "Space") {
+      // A focused button already toggles on Space via click activation —
+      // handling it here too would fire the action twice (net no-op).
+      // closest() covers focus landing on an icon nested inside the button.
+      const onButton = !!target && !!target.closest?.("button");
+
+      if (e.code === "Space" && !onButton) {
         e.preventDefault();
         void togglePlayPause();
       } else if (e.key === "ArrowRight" && (e.ctrlKey || e.metaKey)) {
@@ -161,6 +170,11 @@ function AppInner() {
     } catch (err) {
       console.error("failed to load recently played", err);
     }
+    try {
+      setTopPlayed(await invoke<Track[]>("get_top_played", { limit: 10 }));
+    } catch (err) {
+      console.error("failed to load top played", err);
+    }
   }, []);
 
   // Refresh whenever a new track starts playing (its count was just bumped).
@@ -185,10 +199,16 @@ function AppInner() {
     const setup = async () => {
       try {
         const fn = await listen<WatcherPayload>("watcher-event", (event) => {
-          const { title, count, total } = event.payload;
+          const { title, count, total, kind } = event.payload;
+
+          // Route on the backend's kind flag. The title-regex fallback stays
+          // for older backends; note a track literally named e.g. "Scanner"
+          // would false-positive the legacy path, which is why kind exists.
+          const isScan = kind === "scan" || (kind == null && /scan/i.test(title));
+          const isLibrary = kind === "library" || (kind == null && !/scan/i.test(title));
 
           // Scan lifecycle events stream progress from the backend scanner.
-          if (/scan/i.test(title)) {
+          if (isScan) {
             setScanning(true);
             setScanProgress({ scanned: count, total: total ?? null });
             if (/complete|failed/i.test(title)) {
@@ -211,7 +231,7 @@ function AppInner() {
             return;
           }
 
-          if (count > 0) {
+          if (count > 0 && isLibrary) {
             if (!/^removed$/i.test(title)) {
               pushToast(title, `${count} new track${count > 1 ? "s" : ""}`);
             }
@@ -231,6 +251,27 @@ function AppInner() {
       unlisten?.();
     };
   }, [loadTracks, scheduleIncrementalLoad, pushToast]);
+
+  // Opening a song from anywhere on the PC (file association) jumps straight
+  // into fullscreen playback — the file itself stays out of the library.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<string>("open-file", () => {
+      if (disposed) return;
+      window.setTimeout(() => {
+        if (!disposed) setShowFullNow(true);
+      }, 200);
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -335,6 +376,17 @@ function AppInner() {
     setShowFullNow(true);
   }, [playTrack, libraryTracks]);
 
+  const handleEditTrack = useCallback((track: Track) => {
+    setEditTrack(track);
+  }, []);
+
+  const handleTagsSaved = useCallback((track: Track, patch: Partial<Track>) => {
+    patchTrack(track.file_path, patch);
+    void loadTracks();
+    pushToast("Tags saved", patch.title && patch.title !== track.title ? patch.title : undefined);
+    setEditTrack(null);
+  }, [patchTrack, loadTracks, pushToast]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg">
       <Sidebar
@@ -366,6 +418,7 @@ function AppInner() {
                 <HomeView
                   libraryTracks={libraryTracks}
                   recentlyPlayed={recentlyPlayed}
+                  topPlayed={topPlayed}
                   playTrack={playTrack}
                   onExpandTrack={handleExpandTrack}
                   watchedFolder={watchedFolder}
@@ -375,7 +428,7 @@ function AppInner() {
                 />
               )}
               {currentView === "browse" && (
-                <TracksView tracks={displayedTracks} />
+                <TracksView tracks={displayedTracks} onEditTrack={handleEditTrack} />
               )}
               {currentView === "albums" && (
                 <AlbumsView tracks={libraryTracks} onAlbumClick={handleAlbumClick} />
@@ -461,9 +514,11 @@ function AppInner() {
           <FullscreenNowPlaying
             onClose={() => setShowFullNow(false)}
             onOpenEq={() => { setShowFullNow(false); setShowEq(true); }}
+            onEditTrack={handleEditTrack}
           />
         )}
       </AnimatePresence>
+      <EditTagsModal track={editTrack} onClose={() => setEditTrack(null)} onSaved={handleTagsSaved} />
       <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );

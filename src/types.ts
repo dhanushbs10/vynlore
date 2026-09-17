@@ -15,6 +15,7 @@ export interface Track {
   lyrics?: string | null;
   format: string;
   play_count: number;
+  bitrate: number;
 }
 
 export interface AudioDevice {

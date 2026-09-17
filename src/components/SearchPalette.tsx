@@ -68,6 +68,7 @@ export function SearchPalette({
 
 		const seenArtists = new Set<string>();
 		const seenAlbums = new Set<string>();
+		const seenGenres = new Set<string>();
 		for (const t of tracks) {
 			if (
 				t.title.toLowerCase().includes(q) ||
@@ -111,13 +112,16 @@ export function SearchPalette({
 				}
 			}
 			if (t.genre && t.genre.toLowerCase().includes(q)) {
-				push({
-					key: `g-${t.genre}`,
-					kind: "genre",
-					title: t.genre,
-					subtitle: "Genre",
-					value: t.genre,
-				});
+				if (!seenGenres.has(t.genre.toLowerCase())) {
+					seenGenres.add(t.genre.toLowerCase());
+					push({
+						key: `g-${t.genre}`,
+						kind: "genre",
+						title: t.genre,
+						subtitle: "Genre",
+						value: t.genre,
+					});
+				}
 			}
 		}
 		return map;

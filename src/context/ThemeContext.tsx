@@ -123,6 +123,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         filters: [{ name: "Vynlore theme", extensions: ["json"] }],
       });
       if (typeof target !== "string") return;
+      if (id.startsWith("builtin:")) {
+        // Built-ins have no file on disk — materialize one first so the
+        // backend copy has a source.
+        await invoke("save_theme_file", {
+          fileName,
+          content: JSON.stringify(skin),
+        });
+        const raws = await invoke<string[]>("list_theme_files");
+        setCustom(
+          raws.map(parseSkin).filter((s): s is Skin => s !== null)
+        );
+      }
       await invoke("export_theme_file", {
         fileName,
         targetPath: target,

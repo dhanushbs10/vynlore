@@ -172,7 +172,8 @@ fn design_shelf(f0: f32, gain_db: f32, sample_rate: u32, high: bool) -> Coeffs {
 	}
 
 	let (b0, b1, b2, a0, a1, a2);
-	let alpha = sin_w0 / 2.0 * a.sqrt();
+	// RBJ cookbook shelving slope S=1: alpha = sin(w0)/2 * sqrt(2).
+	let alpha = sin_w0 / 2.0 * 2f64.sqrt();
 	let sq = 2.0 * a.sqrt() * alpha;
 
 	if high {
@@ -399,8 +400,10 @@ impl EqProcessor {
 		self.ensure_filters(&snapshot);
 
 		let ch = self.channels.max(1);
+		// Sized to the channel count — a fixed stereo buffer silently dropped
+		// every channel past the second (no EQ, no limiter) on surround files.
+		let mut buf: Vec<f64> = vec![0.0; ch];
 		for frame in samples.chunks_exact_mut(ch) {
-			let mut buf: [f64; 2] = [0.0; 2];
 			for (c, s) in frame.iter().enumerate() {
 				let mut v = *s as f64;
 				if let Some(bq) = self.bass_filters.get_mut(c) {
@@ -414,18 +417,17 @@ impl EqProcessor {
 				if let Some(bq) = self.treble_filters.get_mut(c) {
 					v = bq.process(v);
 				}
-				if c < buf.len() {
-					buf[c] = v;
-				}
+				buf[c] = v;
 			}
-			// Soft-limit the frame (stereo-linked) before writing back.
-			let lim = frame.len().min(buf.len());
-			self.limiter.process_frame(&mut buf[..lim]);
+			// Soft-limit the frame (linked across all channels) before writing back.
+			let n = frame.len().min(ch);
+			self.limiter.process_frame(&mut buf[..n]);
 			for (c, s) in frame.iter_mut().enumerate() {
-				let v = if c < buf.len() { buf[c] } else { *s as f64 };
-				*s = v.clamp(-1.0, 1.0) as f32;
+				*s = buf[c].clamp(-1.0, 1.0) as f32;
 			}
 		}
+		// A trailing partial frame can't be processed as audio; leaving it
+		// untouched (passthrough) is safer than dropping it silently.
 	}
 }
 
@@ -434,5 +436,91 @@ fn band_q(parametric: bool, q: Option<f32>) -> f32 {
 		q.unwrap_or(DEFAULT_Q)
 	} else {
 		DEFAULT_Q
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use std::sync::{Arc, Mutex};
+
+	fn boosted_proc(band_hz: f32) -> EqProcessor {
+		let settings = Arc::new(Mutex::new(EqSettings {
+			enabled: true,
+			..EqSettings::default()
+		}));
+		{
+			let mut s = settings.lock().unwrap();
+			let boost_hz: Vec<f32> = s
+				.band_hz
+				.iter()
+				.enumerate()
+				.filter(|(_, hz)| (*hz - band_hz).abs() < 200.0)
+				.map(|(i, _)| i as f32)
+				.collect();
+			for i in boost_hz {
+				s.gains[i as usize] = 12.0;
+			}
+		}
+		EqProcessor::new(settings, 48000, 2)
+	}
+
+	#[test]
+	fn heavy_boost_never_clips_or_nans() {
+		let mut proc = boosted_proc(1000.0);
+		let mut frame = vec![0.0f32; 256];
+		let mut max_abs = 0.0f32;
+		for pass in 0..40 {
+			for (i, s) in frame.iter_mut().enumerate() {
+				let ch = if pass % 2 == 0 { 0 } else { 1 };
+				*s = 0.5 * (2.0 * std::f32::consts::PI * 1000.0 * (i / 2) as f32 / 48000.0 + ch as f32).sin();
+			}
+			proc.process_interleaved(&mut frame);
+			for s in &frame {
+				assert!(s.is_finite(), "EQ produced NaN/Inf");
+				max_abs = max_abs.max(s.abs());
+			}
+		}
+		assert!(max_abs <= 1.0005, "output exceeded digital full scale: {}", max_abs);
+	}
+
+	#[test]
+	fn neutral_eq_passes_signal_through() {
+		let settings = Arc::new(Mutex::new(EqSettings::default()));
+		let mut proc = EqProcessor::new(settings, 48000, 2);
+		let mut frame = vec![0.0f32; 64];
+		let mut err = 0.0f32;
+		for pass in 0..20 {
+			for (i, s) in frame.iter_mut().enumerate() {
+				*s = (2.0 * std::f32::consts::PI * 440.0 * (i / 2) as f32 / 48000.0 + pass as f32 * 0.01).sin();
+			}
+			let before = frame.clone();
+			proc.process_interleaved(&mut frame);
+			for (a, b) in frame.iter().zip(before.iter()) {
+				err = err.max((a - b).abs());
+			}
+		}
+		assert!(err < 1e-3, "neutral EQ distorted the signal by {err}");
+	}
+
+	#[test]
+	fn limiter_reduces_loud_sustained_gain() {
+		// +12dB on the 1k band with a 0.5-amplitude 1kHz sine should come out
+		// with soft-limited RMS well under the naively-amplified ~2.0.
+		let mut proc = boosted_proc(1000.0);
+		let mut frame = vec![0.0f32; 1024];
+		let mut sum_sq = 0.0f64;
+		for pass in 0..30 {
+			for (i, s) in frame.iter_mut().enumerate() {
+				*s = 0.5 * (2.0 * std::f32::consts::PI * 1000.0 * (i / 2) as f32 / 48000.0 + pass as f32).sin();
+			}
+			proc.process_interleaved(&mut frame);
+			for s in &frame {
+				sum_sq += (*s as f64) * (*s as f64);
+			}
+		}
+		let rms = (sum_sq / (30 * 1024) as f64).sqrt();
+		assert!(rms < 1.0, "limiter not engaging: RMS {rms}");
+		assert!(rms > 0.01, "limiter went to digital silence: RMS {rms}");
 	}
 }

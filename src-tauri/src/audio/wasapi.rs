@@ -331,7 +331,7 @@ unsafe fn run_render_job(job: RenderJob) {
 /// happens before the device clock runs, so it must not advance the playhead.
 unsafe fn write_samples(
 	render: &IAudioRenderClient,
-	scratch: &[f32],
+	scratch: &mut [f32],
 	frames: usize,
 	fmt: TargetFormat,
 	container_bits: u16,
@@ -349,6 +349,20 @@ unsafe fn write_samples(
 	let left_gain = if bal > 0.01 { 1.0 - bal } else { 1.0 };
 	let right_gain = if bal < -0.01 { 1.0 + bal } else { 1.0 };
 	let passthrough = (vol - 1.0).abs() < 1e-6 && (bal).abs() < 0.01;
+	// Consume first so a boundary crossed by this exact block is already
+	// registered when the fade envelope is computed — otherwise the first
+	// post-boundary buffer misses its fade-in.
+	let start_frame = control.frames_played.load(Ordering::Relaxed);
+	if account {
+		control.consume_frames(frames as i64);
+	}
+	// Crossfade mixes consecutive tracks by fading the tail out before and the
+	// head in after each gapless boundary.
+	control.apply_crossfade(
+		&mut scratch[..frames * ch],
+		start_frame,
+		ch,
+	);
 	let data_ptr = render.GetBuffer(frames as u32).map_err(|e| format!("GetBuffer: {}", e))?;
 
 	if container_bits == 16 {
@@ -388,9 +402,6 @@ unsafe fn write_samples(
 	render
 		.ReleaseBuffer(frames as u32, 0)
 		.map_err(|e| format!("ReleaseBuffer: {}", e))?;
-	if account {
-		control.consume_frames(frames as i64);
-	}
 	Ok(frames)
 }
 
@@ -461,7 +472,7 @@ unsafe fn run_render_loop(
 			std::thread::sleep(Duration::from_millis(2));
 			continue;
 		}
-		write_samples(&render, scratch.as_slice(), frames, fmt, container_bits, control, volume_bits, balance_bits, false)?;
+		write_samples(&render, &mut scratch[..avail * ch], frames, fmt, container_bits, control, volume_bits, balance_bits, false)?;
 	}
 
 	client.Start().map_err(|e| format!("Start: {}", e))?;
@@ -528,7 +539,7 @@ unsafe fn run_render_loop(
 		} else {
 			let frames_written = write_samples(
 				&render,
-				scratch.as_slice(),
+				&mut scratch[..frames * ch],
 				frames,
 				fmt,
 				container_bits,
@@ -602,6 +613,10 @@ pub fn run_diagnostic_sine() {
 		current_file: std::sync::Mutex::new(std::path::PathBuf::from("sine")),
 		replaygain: Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
 		pending_rg_gain: Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
+		playback_rate: Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits())),
+		pitch_semitones: Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
+		crossfade_secs: Arc::new(std::sync::atomic::AtomicU32::new(0.0f32.to_bits())),
+		last_crossed: std::sync::atomic::AtomicI64::new(i64::MIN),
 	});
 	let volume_bits = Arc::new(std::sync::atomic::AtomicU32::new(1.0f32.to_bits()));
 	let spectrum = Arc::new(SpectrumAnalyzer::new());

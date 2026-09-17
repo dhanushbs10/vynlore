@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use serde::Serialize;
@@ -17,11 +18,19 @@ pub struct SpectrumAnalyzer {
     windowed: Mutex<Vec<f64>>,
     re: Mutex<Vec<f64>>,
     im: Mutex<Vec<f64>>,
+    /// True peak of the recent window (0.0..1.0), decayed each emit cycle.
+    peak: Mutex<f32>,
+    /// Set when any recent sample saturates near full scale; cleared on read.
+    clip: AtomicBool,
 }
 
 #[derive(Clone, Serialize)]
 pub struct SpectrumPayload {
     pub bins: Vec<f32>,
+    /// True peak of the recent window (0.0..1.0) for the output meter.
+    pub peak: f32,
+    /// Whether the recent window saturated near full scale (clip latch).
+    pub clipped: bool,
 }
 
 impl SpectrumAnalyzer {
@@ -36,6 +45,8 @@ impl SpectrumAnalyzer {
             windowed: Mutex::new(Vec::with_capacity(2048)),
             re: Mutex::new(Vec::with_capacity(2048)),
             im: Mutex::new(Vec::with_capacity(2048)),
+            peak: Mutex::new(0.0),
+            clip: AtomicBool::new(false),
         }
     }
 
@@ -65,6 +76,11 @@ impl SpectrumAnalyzer {
         while ring.len() > 4096 {
             ring.pop_front();
         }
+        // Clip latch: any sample at/above full scale after the limiter is a
+        // sign the signal is being clamped. Cheap check over the pushed block.
+        if samples.iter().any(|&s| s.abs() >= 0.999) {
+            self.clip.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Compute 64 frequency bins from the ring buffer.
@@ -82,9 +98,18 @@ impl SpectrumAnalyzer {
             snapshot.clear();
             let len = ring.len();
             let start = len - n;
+            // True peak of the window: max |sample| across all channels. Decay
+            // ~0.82/frame (~1s fall to silence at 30fps) so the meter breathes.
+            let mut peak = 0.0f32;
             for &s in ring.range(start..len) {
                 snapshot.push(s);
+                let a = s.abs();
+                if a > peak {
+                    peak = a;
+                }
             }
+            let mut stored = self.peak.lock().unwrap_or_else(|e| e.into_inner());
+            *stored = (*stored * 0.82).max(peak);
         }
 
         let channels = *self.channels.lock().unwrap_or_else(|e| e.into_inner());
@@ -182,6 +207,19 @@ impl SpectrumAnalyzer {
     /// Get the current 64 bins as a Vec<f32>.
     pub fn snapshot(&self) -> Vec<f32> {
         self.bins.lock().unwrap_or_else(|e| e.into_inner()).to_vec()
+    }
+
+    /// Current output meter: (peak, clipped). Clipped is a latch cleared on
+    /// read. Returns silence once playback has been idle for a while.
+    pub fn levels(&self) -> (f32, bool) {
+        let active = self.is_active();
+        let peak = self.peak.lock().unwrap_or_else(|e| e.into_inner());
+        let clipped = self.clip.swap(false, Ordering::Relaxed);
+        if !active {
+            (0.0, clipped)
+        } else {
+            ((*peak).min(1.0), clipped)
+        }
     }
 }
 
