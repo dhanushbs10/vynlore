@@ -368,7 +368,9 @@ return (
             While active, no other app (YouTube, Discord, Spotify, etc.) will be able to play any sound.
           </span>
           <span className="block mt-2">
-            Other apps resume normally when you disable exclusive mode or stop playback.
+            Heads-up: after exclusive mode grabs the device, Chrome/YouTube often gets stuck showing
+            "Audio renderer error" — even after you turn exclusive off. That&apos;s the browser, not a
+            stuck session: just refresh the tab and sound comes back. Other apps resume on their own.
           </span>
         </p>
         <div className="flex gap-3 justify-end">
