@@ -42,7 +42,7 @@ Music folder -> Scanner -> SQLite library -> Your library view
 Press play -> Decode -> Resample -> EQ / ReplayGain -> Sample queue -> Output -> Speakers
 ```
 
-1. **Scan.** You pick a music folder. Vynlore walks it with parallel workers, reads tags and cover art, analyzes loudness for ReplayGain, and stores everything in a local SQLite database. A file watcher keeps the library in sync, so new rips appear and retags refresh on their own.
+1. **Scan.** You pick a music folder. Vynlore walks it with parallel workers, reads tags and cover art, analyzes loudness for ReplayGain, and stores everything in a local SQLite database. Cover art is stored once per unique image, and files with no genre tag get one guessed from their folder. A file watcher keeps the library in sync, so new rips appear and retags refresh on their own.
 2. **Decode.** When you press play, the Rust backend opens the file with Symphonia and decodes it on a dedicated decoder thread. Decoding never happens on the realtime audio thread, so the UI and playback stay smooth.
 3. **Shape.** If the file sample rate differs from the output device, it is resampled with a filter sized to the conversion depth. EQ, ReplayGain, preamp, and balance are applied on that same background thread.
 4. **Output.** Finished samples go into a bounded queue. The output thread pulls from it and writes to your device through WASAPI exclusive mode when available, or shared mode otherwise. Exclusive mode runs at the file native rate with no system mixer in the path.
@@ -57,9 +57,10 @@ Press play -> Decode -> Resample -> EQ / ReplayGain -> Sample queue -> Output ->
 - Gapless playback with optional 0-8s crossfade layered on top
 - WASAPI exclusive mode with per-device output selection
 - 24-bit and high-sample-rate files (96/176.4 kHz) play clean, end to end
-- Parametric EQ (5-32 bands, adjustable Q) with shelf filters, preamp, and balance
+- Parametric EQ (5-32 bands, adjustable Q) with shelf filters, preamp, balance, and 13 built-in presets
 - ReplayGain loudness normalization: off, per-track, or per-album
-- AutoEQ profile import plus genre-aware presets that follow your music
+- AutoEQ profile import plus genre auto-match that follows your music
+- Player bar shows the live format of whatever is playing
 - Speed 0.25x-4x (pitch-preserving) and +-12 semitone pitch shift
 - Live spectrum analyzer and full-file RMS waveform seekbar
 </details>
@@ -67,10 +68,12 @@ Press play -> Decode -> Resample -> EQ / ReplayGain -> Sample queue -> Output ->
 <details>
 <summary><b>A library that manages itself</b></summary>
 
-- Folder watching: new files appear automatically, retags refresh instantly
-- Browse by tracks, albums, artists, and genres, plus recently and most played
+- Folder watching with live progress and a manual rescan button: new files appear automatically, retags refresh instantly
+- Browse by tracks, albums, artists, and genres, plus recently played, most played, and recently added
+- Like any track into the protected Liked Songs playlist
 - Safe by design: offline drives never wipe your library, retags keep likes and play counts
-- Playlists with cover art and color coding, M3U import and export
+- Playlists with custom covers and color coding, rename and delete, M3U import and export
+- Missing genre tags are guessed from the folder the file lives in; cover art is stored once per unique image
 - In-app tag editor that writes straight to your files
 </details>
 
@@ -78,7 +81,8 @@ Press play -> Decode -> Resample -> EQ / ReplayGain -> Sample queue -> Output ->
 <summary><b>Control from anywhere</b></summary>
 
 - Global search palette (`Ctrl+K`) with fuzzy search across everything
-- Media keys, taskbar controls (SMTC), system tray, and track notifications
+- Media keys, taskbar controls (SMTC), system tray with close-to-tray, launch on startup, and track notifications
+- Shuffle and repeat modes, with every setting (volume, device, EQ, balance, ReplayGain, speed, pitch, crossfade, theme) remembered across restarts
 - Sleep timer, ListenBrainz scrobbling, synced lyrics (embedded tags plus online lookup)
 - Fullscreen now-playing view with click-to-seek lyrics
 - Double-click any audio file to play it instantly
