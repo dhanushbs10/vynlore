@@ -1,134 +1,124 @@
-# Vynlore
+<div align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="96" alt="Vynlore logo" />
+  <h1>Vynlore</h1>
+  <p><b>Your music, decoded in Rust, played the way it was mastered.</b></p>
+  <p>A lossless-first desktop player for Windows — gapless, fast, and obsessive about sound.</p>
 
-A lossless-first desktop music player built with Tauri v2, React, and Rust.
+  <p>
+    <img src="https://img.shields.io/badge/Windows-0078D6?logo=windows&logoColor=white" alt="Windows" />
+    <img src="https://img.shields.io/badge/Tauri_v2-FFC131?logo=tauri&logoColor=black" alt="Tauri v2" />
+    <img src="https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB" alt="React" />
+    <img src="https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white" alt="Rust" />
+    <img src="https://img.shields.io/badge/FLAC%E2%80%A2WAV%E2%80%A2MP3%E2%80%A2M4A-18181b" alt="Formats" />
+  </p>
 
-Vynlore is a local music player designed for audiophiles who care about playback quality. It decodes all major formats natively in Rust, outputs through WASAPI exclusive mode for bit-perfect delivery, and ships with a multi-band parametric equalizer with genre-aware presets.
+  <p>
+    <a href="https://github.com/dhanushbs10/vynlore/releases/tag/v1.2.0"><b>⬇ Download v1.2.0 for Windows</b></a>
+  </p>
+</div>
 
-## Download
+---
 
-Grab the latest build from [Releases](https://github.com/dhanushbs10/vynlore/releases).
+## Why Vynlore?
+
+- 🎧 **Serious sound engine** — native Rust decoding, gapless playback, WASAPI exclusive output, and a real parametric EQ.
+- ⚡ **Instant library** — point it at a folder and thousands of tracks are scanned, tagged, and browsable in seconds.
+- 🎨 **Yours to skin** — monochrome by default, fully themeable via shareable JSON skins.
+
+No accounts. No cloud. No streaming. Just your files, played properly.
+
+## Get it
+
+Grab the `.exe` (NSIS installer) from [Releases](https://github.com/dhanushbs10/vynlore/releases), install, then go to **Settings → Apps → Default Apps** and set Vynlore as the default player for your audio formats.
 
 | Platform | Installer |
 |----------|-----------|
 | Windows  | `.exe` (NSIS installer) |
 
-After installing on Windows, go to **Settings > Apps > Default Apps** and set Vynlore as the default player for your audio formats.
+## Highlights
 
-## What's new in v1.2.0
+<details>
+<summary><b>🔊 Sound that respects the source</b></summary>
 
-**New features**
-- Playback speed (0.25x–4x, pitch-preserving WSOLA) and pitch shift (±12 semitones)
-- Crossfade between tracks (0–8s) layered over gapless playback
-- ReplayGain loudness normalization (off / per-track / per-album, EBU R128)
-- Custom skins: import, export, and theme the whole UI from JSON files
-- Sleep timer, ListenBrainz scrobbling, online lyrics (LRCLIB) with synced display
-- In-app tag editor, M3U playlist import/export, AutoEQ profile import
-- Balance, preamp, per-device output selection, balance-safe exclusive mode
-- System tray, taskbar media controls (SMTC), media keys, track notifications
-- Double-click any audio file to play it (file association)
+- Gapless playback with optional 0–8s crossfade layered on top
+- WASAPI exclusive mode + per-device output selection
+- 24-bit / high-sample-rate files (96/176.4 kHz) play clean, end to end
+- Parametric EQ (5–32 bands, adjustable Q) with shelves, preamp, and balance
+- ReplayGain loudness normalization — off, per-track, or per-album
+- AutoEQ profile import + genre-aware presets that follow your music
+- Speed 0.25x–4x (pitch-preserving) and ±12 semitone pitch shift
+- Live spectrum analyzer and full-file RMS waveform seekbar
+</details>
 
-**Fixed**
-- High-sample-rate files (96/176.4 kHz) stuttering or going silent: the resampler now scales its filter to the conversion depth instead of choking realtime
-- 24-bit playback verified end-to-end (decode → resample → output) with new integration tests
-- Seeking with crossfade or a queued next track no longer mis-fires fades or jumps position
-- M3U export, ListenBrainz scrobbling and online lyrics (were silently blocked/ broken)
-- EQ and ReplayGain on surround (>2ch) files; loudness analysis crash on surround files
-- Library wipes: startup prune skips when the music drive is offline; retagged files keep likes/counts/analysis
-- Retagged/edited files refresh instantly; changed files get fresh loudness analysis
-- Much faster library scans (parallel workers, no idle sleeping) with live progress
-- Waveforms now cover full hi-res files instead of truncating after ~17 seconds
-- Same-title albums by different artists get independent album gain; compilations still level as one release
-- Dozens of smaller UI, state and robustness fixes across the app (see commit history)
+<details>
+<summary><b>📚 A library that manages itself</b></summary>
 
-## Features
+- Folder watching — new rips appear automatically, retags refresh instantly
+- Browse by tracks, albums, artists, genres, recently played, most played
+- Smart handling: offline drives never wipe your library, retags keep likes and play counts
+- Playlists with cover art and color coding, M3U import/export
+- In-app tag editor that writes straight to your files
+</details>
 
-### Playback
+<details>
+<summary><b>⌨️ Control from anywhere</b></summary>
 
-- Gapless playback with optional crossfade (0–8s)
-- Playback speed (0.25x–4x) and pitch shift (±12 semitones)
-- WASAPI exclusive mode for bit-perfect output
-- Multi-format decoding: FLAC, WAV, AIFF, MP3, M4A, OGG (incl. 24-bit / high-sample-rate)
-- Real-time spectrum analyzer
-- Waveform seekbar with RMS visualization
+- Global search palette (`Ctrl+K`) — fuzzy search across everything
+- Media keys, taskbar controls (SMTC), system tray, track notifications
+- Sleep timer, ListenBrainz scrobbling, synced lyrics (embedded + online via LRCLIB)
+- Fullscreen now-playing view with click-to-seek lyrics
+- Double-click any audio file to play it instantly
+</details>
 
-### Library
+<details>
+<summary><b>🎨 Looks that adapt to you</b></summary>
 
-- Automatic folder watching and fast parallel library scanning with live progress
-- Browse by tracks, albums, artists, and genres
-- Recently played, most played, and smart suggestions
-- Playlist creation with cover art and color coding, M3U import/export
-- Track liking and play count tracking
-- In-app tag editor (writes straight to files)
+- Clean monochrome design, distraction-free
+- Custom skins: import, export, and share the whole UI as JSON
+- Reorderable queue panel, global shortcuts, smooth dark interface
+</details>
 
-### Audio
+## Up and running in 60 seconds
 
-- Parametric equalizer (5–32 bands, default 10) with adjustable Q
-- Bass and treble shelf filters
-- Preamp gain control
-- ReplayGain loudness normalization (off / per-track / per-album)
-- Auto-EQ: parse AutoEq profile text files and apply correction curves
-- Genre-aware EQ presets (Rock, Jazz, Classical, Electronic, Hip-Hop, Acoustic, Metal, Pop, R&B, Folk)
-- Balance (left/right panning)
-- Per-device output selection
+1. **Install** the `.exe` from [Releases](https://github.com/dhanushbs10/vynlore/releases).
+2. **Add music** — pick a folder when prompted (or later in settings).
+3. **Press play** — browse, hit `Ctrl+K` to find anything, double-click to play.
 
-### Interface
+## Shortcuts
 
-- Clean monochrome design with custom skins (import/export/share as JSON)
-- Fullscreen now-playing view with synced lyrics (embedded + online)
-- Global search palette (Ctrl+K)
-- Queue panel with drag-style reorder
-- Sleep timer
-- ListenBrainz scrobbling
-- Media key support (play/pause, next, previous) + taskbar controls + system tray
-- Track-change notifications
-- File association: double-click any audio file to play it
+| Keys | Action |
+|------|--------|
+| `Space` | Play / pause |
+| `←` / `→` | Seek ∓ 5s |
+| `Ctrl` + `←` / `→` | Previous / next track |
+| `Ctrl` + `K` | Search everything |
 
-## Tech Stack
+## Formats
 
-- **Backend:** Rust (Tauri v2, Symphonia, CPAL, WASAPI)
-- **Frontend:** React 18, TypeScript, Tailwind CSS v4, Vite
-- **Audio Engine:** Custom Rust decoder with Symphonia, CPAL output, real-time EQ via biquad filters
+**FLAC · WAV · AIFF · MP3 · M4A · OGG** — lossless-first, lossy welcome.
 
-## Development
+## Under the hood
 
-### Prerequisites
+Rust (Tauri v2 · Symphonia · CPAL · WASAPI) + React 18 · TypeScript · Tailwind v4 · Vite. Decode and DSP run off the realtime thread; the audio callback only moves samples.
 
-- [Node.js](https://nodejs.org/) 18+
-- [Rust](https://rustup.rs/) (latest stable)
-- [Tauri CLI](https://v2.tauri.app/start/prerequisites/)
+<details>
+<summary><b>🛠 Build from source</b></summary>
 
-### Setup
+Requires [Node.js](https://nodejs.org/) 18+, [Rust](https://rustup.rs/) stable, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 git clone https://github.com/dhanushbs10/vynlore.git
 cd vynlore
 npm install
+npx tauri dev      # run it
+npx tauri build    # installer lands in src-tauri/target/release/bundle/
 ```
 
-### Run in development
+</details>
 
-```bash
-npx tauri dev
-```
+## Changelog
 
-### Build for production
-
-```bash
-npx tauri build
-```
-
-The installer will be in `src-tauri/target/release/bundle/`.
-
-## Supported Formats
-
-| Format | Extensions | Type |
-|--------|-----------|------|
-| FLAC | `.flac` | Lossless |
-| WAV | `.wav`, `.wave` | Lossless |
-| AIFF | `.aiff`, `.aif`, `.aifc` | Lossless |
-| MP3 | `.mp3` | Lossy |
-| M4A | `.m4a`, `.m4b` | Lossy |
-| OGG | `.ogg`, `.oga` | Lossy |
+See [CHANGELOG.md](CHANGELOG.md) — currently at **v1.2.0**.
 
 ## License
 
