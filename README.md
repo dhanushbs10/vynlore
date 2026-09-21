@@ -57,8 +57,8 @@ Press play -> Decode -> Resample -> EQ / ReplayGain -> Sample queue -> Output ->
 - Gapless playback with optional 0-8s crossfade layered on top
 - WASAPI exclusive mode with per-device output selection
 - 24-bit and high-sample-rate files (96/176.4 kHz) play clean, end to end
-- Parametric EQ (5-32 bands, adjustable Q) with shelf filters, preamp, balance, and 13 built-in presets
-- ReplayGain loudness normalization: off, per-track, or per-album
+- Parametric EQ (5-32 bands, adjustable Q) with shelf filters, preamp, balance, 13 built-in presets, A/B snapshot compare, and a clip-detecting output meter
+- ReplayGain loudness normalization: off, per-track (the default), or per-album, analyzed automatically at scan time
 - AutoEQ profile import plus genre auto-match that follows your music
 - Player bar shows the live format of whatever is playing
 - Speed 0.25x-4x (pitch-preserving) and +-12 semitone pitch shift
@@ -69,30 +69,31 @@ Press play -> Decode -> Resample -> EQ / ReplayGain -> Sample queue -> Output ->
 <summary><b>A library that manages itself</b></summary>
 
 - Folder watching with live progress and a manual rescan button: new files appear automatically, retags refresh instantly
-- Browse by tracks, albums, artists, and genres, plus recently played, most played, and recently added
+- Home serves recently played, most played, recently added, and smart suggestions built from what you actually play
+- Browse by tracks, albums, artists, and genres; artists split on feat., &, and / so collaborations appear under every credited name
 - Like any track into the protected Liked Songs playlist
 - Safe by design: offline drives never wipe your library, retags keep likes and play counts
-- Playlists with custom covers and color coding, rename and delete, M3U import and export
+- Playlists with custom covers and color coding, rename and delete, M3U import, and M3U export of whatever is queued
 - Missing genre tags are guessed from the folder the file lives in; cover art is stored once per unique image
-- In-app tag editor that writes straight to your files
+- In-app tag editor (title, artist, album, genre, track and disc numbers) that writes straight to your files
 </details>
 
 <details>
 <summary><b>Control from anywhere</b></summary>
 
-- Global search palette (`Ctrl+K`) with fuzzy search across everything
+- Global search palette (`Ctrl+K`): instant results across tracks, artists, albums, and genres with full keyboard navigation
 - Media keys, taskbar controls (SMTC), system tray with close-to-tray, launch on startup, and track notifications
 - Shuffle and repeat modes, with every setting (volume, device, EQ, balance, ReplayGain, speed, pitch, crossfade, theme) remembered across restarts
-- Sleep timer, ListenBrainz scrobbling, synced lyrics (embedded tags plus online lookup)
-- Fullscreen now-playing view with click-to-seek lyrics
-- Double-click any audio file to play it instantly
+- Sleep timer that pauses playback and survives restarts, ListenBrainz scrobbling, synced lyrics (embedded tags plus online lookup)
+- Fullscreen now-playing view with auto-scrolling, click-to-seek lyrics
+- Double-click any audio file to play it instantly, without adding it to your library
 </details>
 
 <details>
 <summary><b>Looks that adapt to you</b></summary>
 
 - Clean monochrome design, distraction-free
-- Custom skins: import, export, and share the whole UI as JSON
+- Custom skins: 9 built in (including Paper, a light theme), plus import, export, and share of the whole UI as JSON, down to raw CSS
 - Reorderable queue panel, global shortcuts, smooth dark interface
 </details>
 
@@ -113,7 +114,7 @@ Press play -> Decode -> Resample -> EQ / ReplayGain -> Sample queue -> Output ->
 
 ## Formats
 
-FLAC, WAV, AIFF, MP3, M4A, OGG. Lossless first, lossy welcome.
+FLAC, WAV, AIFF, MP3, M4A, OGG. Lossless first, lossy welcome. (Opus is not supported: the decoder library cannot decode it.)
 
 ## Under the hood
 
