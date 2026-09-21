@@ -11,7 +11,6 @@ Grab the latest build from [Releases](https://github.com/dhanushbs10/vynlore/rel
 | Platform | Installer |
 |----------|-----------|
 | Windows  | `.exe` (NSIS installer) |
-| macOS / Linux | Built by CI from the same tree, but exclusive-mode output and several OS integrations are Windows-only and unverified elsewhere |
 
 After installing on Windows, go to **Settings > Apps > Default Apps** and set Vynlore as the default player for your audio formats.
 

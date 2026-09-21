@@ -1,7 +1,11 @@
 node_modules/
 dist/
 src-tauri/target/
+target/
 *.log
 *.db
+*.db-shm
+*.db-wal
+project_export*.txt
 .DS_Store
 Thumbs.db
