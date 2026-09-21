@@ -49,53 +49,67 @@ Press play -> Decode -> Resample -> EQ / ReplayGain -> Sample queue -> Output ->
 5. **Chain.** For gapless albums, the next track is decoded into the same continuous stream. No gap, no click, no restart between tracks.
 6. **Display.** The React frontend polls playback position several times per second and listens for backend events (track changes, library updates) to keep the progress bar, queue, and views in sync.
 
-## Highlights
+## Features
 
-<details>
-<summary><b>Sound that respects the source</b></summary>
+### Playback
 
-- Gapless playback with optional 0-8s crossfade layered on top
-- WASAPI exclusive mode with per-device output selection
-- 24-bit and high-sample-rate files (96/176.4 kHz) play clean, end to end
-- Parametric EQ (5-32 bands, adjustable Q) with shelf filters, preamp, balance, 13 built-in presets, A/B snapshot compare, and a clip-detecting output meter
-- ReplayGain loudness normalization: off, per-track (the default), or per-album, analyzed automatically at scan time
-- AutoEQ profile import plus genre auto-match that follows your music
-- Player bar shows the live format of whatever is playing
-- Speed 0.25x-4x (pitch-preserving) and +-12 semitone pitch shift
-- Live spectrum analyzer and full-file RMS waveform seekbar
-</details>
+- Gapless playback within one channel layout, with a clean restart across layout changes
+- Crossfade slider (0-8s, off by default) layered over gapless transitions
+- WASAPI exclusive output at the file native rate, channels, and bit depth, with automatic shared-mode fallback per track
+- Shared-mode output that prefers standard rates and never hogs the session
+- Per-device output selection with System Default fallback
+- Native decoding of FLAC, WAV, AIFF, MP3, M4A, and OGG, including 24-bit and 96/176.4 kHz files
+- Accurate seeking and first-decodable-track probing for multi-stream files
+- Adaptive resampling that scales filter depth to the conversion
+- Parametric EQ with 5-32 bands (10 by default), per-band Q, and bass and treble shelves
+- Soft limiter plus hard clamp so EQ boosts never clip, with click-free coefficient smoothing
+- 13 built-in EQ presets with genre auto-match across dozens of genre keywords
+- AutoEQ profile import with band-count validation
+- A/B snapshot compare, clickable frequency-response curve, and selectable band counts
+- Preamp (0.5x-2x), left/right balance with center detent, and 0-100 percent volume
+- ReplayGain loudness normalization (off, per-track default, per-album) analyzed at scan time
+- Playback speed 0.25x-4x with pitch-preserving stretch, plus pitch shift up to +/-12 semitones
+- 64-bar spectrum analyzer, full-file RMS waveform seekbar, and clip-detecting output meter
+- Live format badge and lossless indicator on whatever is playing
+- Shuffle that keeps the current track first, repeat off/all/one, and a drag-reorderable Up Next queue
+- Sleep timer presets that pause playback and survive restarts
+- Frame-exact position tracking across gapless seams
 
-<details>
-<summary><b>A library that manages itself</b></summary>
+### Library
 
-- Folder watching with live progress and a manual rescan button: new files appear automatically, retags refresh instantly
-- Home serves recently played, most played, recently added, and smart suggestions built from what you actually play
-- Browse by tracks, albums, artists, and genres; artists split on feat., &, and / so collaborations appear under every credited name
-- Like any track into the protected Liked Songs playlist
-- Safe by design: offline drives never wipe your library, retags keep likes and play counts
-- Playlists with custom covers and color coding, rename and delete, M3U import, and M3U export of whatever is queued
-- Missing genre tags are guessed from the folder the file lives in; cover art is stored once per unique image
-- In-app tag editor (title, artist, album, genre, track and disc numbers) that writes straight to your files
-</details>
+- Watched folder with fast parallel scanning, live progress, manual rescan, and a 10-minute failsafe
+- Unchanged files skipped without re-decoding; brand-new files get a stability check first
+- Filesystem watcher with debounce: new rips appear and retags refresh on their own
+- Offline drives never wipe the library; retags keep likes, play counts, and analysis
+- Home with recently played, most played, recently added, and smart suggestions
+- Track, album, artist, and genre browsing with grouped detail views and hero controls
+- Collaboration-aware artists (splits on feat., &, /) plus folder-based genre guessing
+- Like button feeding a protected Liked Songs playlist
+- Playlists with custom covers, 12 color presets, inline rename, per-row remove, and in-list shuffle
+- M3U import that plays as a queue, and M3U export of whatever is queued
+- In-app tag editor (title, artist, album, genre, track/disc) that writes to files and refreshes the library
+- Cover art stored once per unique image; unknown art never mislabeled
+- Local SQLite library with play counts and last-played stamps on every start, including gapless chains
 
-<details>
-<summary><b>Control from anywhere</b></summary>
+### Control and system
 
-- Global search palette (`Ctrl+K`): instant results across tracks, artists, albums, and genres with full keyboard navigation
-- Media keys, taskbar controls (SMTC), system tray with close-to-tray, launch on startup, and track notifications
-- Shuffle and repeat modes, with every setting (volume, device, EQ, balance, ReplayGain, speed, pitch, crossfade, theme) remembered across restarts
-- Sleep timer that pauses playback and survives restarts, ListenBrainz scrobbling, synced lyrics (embedded tags plus online lookup)
-- Fullscreen now-playing view with auto-scrolling, click-to-seek lyrics
-- Double-click any audio file to play it instantly, without adding it to your library
-</details>
+- Global search palette (Ctrl+K) with instant grouped results and full keyboard navigation
+- Shortcuts for play/pause, 5-second seeking, track change, and closing dialogs
+- Media keys, taskbar controls with cover art and seeking, and live metadata push
+- System tray with playback menu, close-to-tray, launch on startup, and unfocused track notifications
+- ListenBrainz scrobbling with retry queue and now-playing pings
+- Synced lyrics from embedded tags plus online lookup, with auto-scroll, click-to-seek, and approx-sync labeling
+- Fullscreen now-playing view with blurred artwork backdrop and transport controls
+- Double-click any supported file to play it without adding it to the library
+- In-app toasts for scans, watcher events, and saved tags
+- Window title follows the playing track
+- Every setting remembered across restarts (volume, device, EQ, balance, ReplayGain, speed, pitch, crossfade, sleep, theme)
 
-<details>
-<summary><b>Looks that adapt to you</b></summary>
+### Appearance
 
-- Clean monochrome design, distraction-free
-- Custom skins: 9 built in (including Paper, a light theme), plus import, export, and share of the whole UI as JSON, down to raw CSS
-- Reorderable queue panel, global shortcuts, smooth dark interface
-</details>
+- 9 built-in skins including the light Paper theme, with live previews
+- Custom JSON skins: import, export, delete, 17 color tokens, custom variables, and raw CSS
+- Monochrome distraction-free design with a reorderable queue panel
 
 ## Up and running in 60 seconds
 
