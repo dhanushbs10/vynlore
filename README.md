@@ -141,4 +141,4 @@ See [CHANGELOG.md](CHANGELOG.md). Currently at **v1.2.0**.
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE) for the full text.
