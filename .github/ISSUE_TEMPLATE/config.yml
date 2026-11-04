@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, setup help and ideas
+    url: https://github.com/dhanushbs10/vynlore/discussions
+    about: Ask here when you are not sure whether something is a bug.
+  - name: Architecture and contributor guide
+    url: https://github.com/dhanushbs10/vynlore/blob/master/CONTRIBUTING.md
+    about: Setup, coding rules, tests and the manual audio checklist.
+  - name: Security policy
+    url: https://github.com/dhanushbs10/vynlore/blob/master/SECURITY.md
+    about: Report vulnerabilities privately, never in a public issue.

@@ -1,0 +1,123 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please search existing issues first, and use Discussions for setup questions or open-ended ideas.
+
+        If this is a security issue, do **not** open a public issue. See [SECURITY.md](https://github.com/dhanushbs10/vynlore/blob/master/SECURITY.md).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you report
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I am running the latest release, or I built from the current master.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Vynlore version
+      description: The version in Settings, the installer name, or the commit hash.
+      placeholder: v1.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2 (build 26100)
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Audio device
+      description: The output device selected in Vynlore, including the connection (USB, internal, HDMI, Bluetooth).
+      placeholder: Topping E30 II over USB
+    validations:
+      required: true
+
+  - type: dropdown
+    id: output-mode
+    attributes:
+      label: Output mode
+      options:
+        - WASAPI exclusive
+        - Shared mode
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: format
+    attributes:
+      label: File format and properties
+      description: Format, sample rate, bit depth and channel count if known.
+      placeholder: FLAC, 24-bit, 96 kHz, stereo
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A minimal sequence that triggers the problem.
+      placeholder: |
+        1. Open the album ...
+        2. Seek to ...
+        3. Press ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include the exact error text or toast if there is one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: |
+        For a source build, paste the terminal output from `npx tauri dev` (set `RUST_BACKTRACE=1` for panics).
+        For an installed build, a screenshot of the error and the relevant Settings values help.
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: library-size
+    attributes:
+      label: Library size (optional)
+      placeholder: ~12,000 tracks
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Does it happen with one file or every file? Did it work in a previous version?
+    validations:
+      required: false

@@ -1,10 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Documentation and contributor infrastructure
+
+- Rewrote the README with accurate UI limits, project status, supported formats and contributor links.
+- Added `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue/PR templates and a CI workflow.
+- Added `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/PROJECT_STATUS.md` and a screenshot capture guide.
+
 ## v1.2.0
 
 ### New features
 
-- Playback speed (0.25x–4x, pitch-preserving WSOLA) and pitch shift (±12 semitones)
+- Playback speed (0.5x–2x in the UI; the engine supports 0.25x–4x) and pitch shift (±6 semitones in the UI; the engine supports ±12), pitch-preserving WSOLA
 - Crossfade between tracks (0–8s) layered over gapless playback
 - ReplayGain loudness normalization (off / per-track / per-album, EBU R128 flavour)
 - Custom skins: import, export, and theme the whole UI from JSON files
