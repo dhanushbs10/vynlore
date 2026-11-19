@@ -38,9 +38,10 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
     return Array.from(map.entries()).map(([album, tracks]) => ({ album, tracks }));
   }, [artistTracks]);
 
-  const coverSrc = hasCover(artistTracks[0])
-    ? convertFileSrc(artistTracks[0].cover_path!)
-    : undefined;
+  const coverSrc =
+    artistTracks.length > 0 && hasCover(artistTracks[0])
+      ? convertFileSrc(artistTracks[0].cover_path!)
+      : undefined;
 
   const totalDuration = artistTracks.reduce((acc, t) => acc + t.duration_secs, 0);
   const albumCount = groupedAlbums.length;
@@ -118,7 +119,17 @@ export function ArtistDetailView({ artist, tracks, onBack, playTrack }: ArtistDe
       </div>
 
       <div>
-        {groupedAlbums.map(({ album, tracks: albumTracks }) => {
+        {artistTracks.length === 0 ? (
+          <div className="text-center py-24 text-text-muted">
+            <div className="text-sm text-text-secondary">This artist has no tracks right now.</div>
+            <button
+              onClick={onBack}
+              className="mt-4 px-3 py-2 rounded-md border border-border bg-transparent text-text-secondary text-xs font-semibold hover:bg-white-5 hover:text-text transition-colors"
+            >
+              Back to artists
+            </button>
+          </div>
+        ) : groupedAlbums.map(({ album, tracks: albumTracks }) => {
           const albumCover = hasCover(albumTracks[0])
             ? convertFileSrc(albumTracks[0].cover_path!)
             : undefined;
